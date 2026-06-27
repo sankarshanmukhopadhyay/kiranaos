@@ -1,0 +1,35 @@
+services:
+  api:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      KIRANA_DATABASE_URL: sqlite:////data/kiranaos.db
+      KIRANA_WHATSAPP_VERIFY_TOKEN: local-dev-token
+      KIRANA_FRONTEND_ORIGIN: http://localhost:5173
+      KIRANA_LOG_LEVEL: INFO
+    volumes:
+      - kirana-data:/data
+      - ./backend/app:/app/app   # hot-reload in dev
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  web:
+    image: node:22-alpine
+    working_dir: /app
+    command: sh -c "npm install && npm run dev -- --host"
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_BASE: ""    # empty = use Vite proxy to localhost:8000
+    volumes:
+      - ./frontend:/app
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  kirana-data:
