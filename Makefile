@@ -17,6 +17,12 @@ dev-frontend:  ## Start the frontend only
 seed:          ## Seed demo data into the database
 	cd backend && python -m app.db.seed
 
+migrate:       ## Apply Alembic migrations
+	cd backend && alembic upgrade head
+
+migration:     ## Create an Alembic migration, e.g. make migration msg="add table"
+	cd backend && alembic revision --autogenerate -m "$(msg)"
+
 # ── Testing ───────────────────────────────────────────────────────────────────
 
 test:          ## Run all backend tests

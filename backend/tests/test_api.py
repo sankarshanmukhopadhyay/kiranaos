@@ -108,6 +108,18 @@ def test_twilio_webhook_creates_order():
     assert any(o["customer"]["phone"] == "+919999990040" for o in orders)
 
 
+def test_voice_without_transcription_sets_needs_review():
+    res = client.post("/api/ingest/messages", json={
+        "phone": "+919999990041",
+        "message_type": "voice",
+        "media_url": "https://example.invalid/order.ogg",
+        "media_type": "audio/ogg",
+    })
+    assert res.status_code == 201
+    assert res.json()["status"] == "needs_review"
+    assert "Voice note" in res.json()["notes"]
+
+
 # ── Order status transitions ───────────────────────────────────────────────────
 
 def test_advance_order_status():
@@ -149,6 +161,25 @@ def test_set_order_amount():
     assert res.json()["is_credit"] is True
 
 
+def test_outbound_confirmation_is_recorded():
+    create_res = client.post("/api/ingest/messages", json={
+        "phone": "+919999990008",
+        "customer_name": "Confirm Test",
+        "text": "bread",
+    })
+    order_id = create_res.json()["id"]
+
+    res = client.post(
+        f"/api/orders/{order_id}/confirmations",
+        json={"body": "Order packed, Confirm Test ji!"},
+    )
+    assert res.status_code == 201
+    body = res.json()
+    assert body["order_id"] == order_id
+    assert body["status"] == "simulated"
+    assert body["destination_phone"] == "+919999990008"
+
+
 # ── Customer management ────────────────────────────────────────────────────────
 
 def test_create_customer_directly():
@@ -167,6 +198,47 @@ def test_duplicate_phone_rejected():
     assert res.status_code == 409
 
 
+def test_operator_login_returns_jwt():
+    create = client.post("/api/operators", json={
+        "username": "owner",
+        "password": "supersecret",
+        "role": "owner",
+    })
+    assert create.status_code == 201
+
+    login = client.post("/api/auth/login", json={
+        "username": "owner",
+        "password": "supersecret",
+    })
+    assert login.status_code == 200
+    assert login.json()["access_token"].count(".") == 2
+
+
+def test_store_scoped_duplicate_phone_allowed_across_stores():
+    from app.schemas.domain import CustomerCreateIn
+    from app.services.ingestion import create_customer
+
+    store = client.post("/api/stores", json={
+        "name": "Second Store",
+        "slug": "second-store",
+    })
+    assert store.status_code == 201
+    second_store_id = store.json()["id"]
+
+    db = SessionLocal()
+    try:
+        first = create_customer(db, CustomerCreateIn(name="One", phone="+919999990012"), store_id=1)
+        second = create_customer(
+            db,
+            CustomerCreateIn(name="Two", phone="+919999990012"),
+            store_id=second_store_id,
+        )
+    finally:
+        db.close()
+    assert first.phone == second.phone
+    assert first.store_id != second.store_id
+
+
 # ── Udhaari / credit ──────────────────────────────────────────────────────────
 
 def test_extend_and_settle_credit():
@@ -179,6 +251,48 @@ def test_extend_and_settle_credit():
 
     res = client.post(f"/api/customers/{cid}/credit", json={"amount": -200.0, "reason": "paid"})
     assert res.json()["credit_balance"] == pytest.approx(300.0)
+
+
+def test_upi_payment_reconciles_credit_ledger():
+    client.post("/api/ingest/messages", json={"phone": "+919999990022", "text": "rice"})
+    customers = client.get("/api/customers").json()
+    cid = next(c["id"] for c in customers if c["phone"] == "+919999990022")
+    client.post(f"/api/customers/{cid}/credit", json={"amount": 500.0, "reason": "udhaari"})
+
+    payment = client.post("/api/payments/upi/webhook", json={
+        "provider_ref": "upi-ref-001",
+        "amount": 200.0,
+        "customer_id": cid,
+        "payer_vpa": "customer@upi",
+    })
+    assert payment.status_code == 201
+    assert payment.json()["status"] == "reconciled"
+
+    customer = client.get(f"/api/customers/{cid}").json()
+    assert customer["credit_balance"] == pytest.approx(300.0)
+
+
+def test_delivery_assignment_and_route():
+    order_res = client.post("/api/ingest/messages", json={
+        "phone": "+919999990023",
+        "customer_name": "Route Customer",
+        "building": "A-301",
+        "text": "milk",
+    })
+    order_id = order_res.json()["id"]
+    agent = client.post("/api/delivery/agents", json={"name": "Ramesh", "phone": "+919999991111"})
+    assert agent.status_code == 201
+    agent_id = agent.json()["id"]
+
+    assignment = client.post(
+        f"/api/orders/{order_id}/delivery",
+        json={"agent_id": agent_id, "route_order": 1},
+    )
+    assert assignment.status_code == 201
+
+    route = client.get(f"/api/delivery/agents/{agent_id}/route")
+    assert route.status_code == 200
+    assert route.json()[0]["order_id"] == order_id
 
 
 def test_payment_cannot_exceed_balance():

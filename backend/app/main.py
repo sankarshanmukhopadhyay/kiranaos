@@ -5,7 +5,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import router
 from app.core.config import get_settings
-from app.db.session import Base, engine
+from app.db.session import Base, SessionLocal, engine
+from app.services.auth import ensure_default_store
 
 
 def create_app() -> FastAPI:
@@ -15,10 +16,15 @@ def create_app() -> FastAPI:
     # Create all tables on startup (SQLite dev convenience).
     # For production Postgres, use Alembic migrations instead.
     Base.metadata.create_all(bind=engine)
+    db = SessionLocal()
+    try:
+        ensure_default_store(db)
+    finally:
+        db.close()
 
     app = FastAPI(
         title="KiranaOS API",
-        version="2.0.0",
+        version="2.1.0",
         description=(
             "WhatsApp-native order management for kirana stores. "
             "Converts inbound messages into structured orders. "

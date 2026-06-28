@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.db.session import get_db
-from app.models.domain import MessageType, OrderStatus
+from app.models.domain import MessageType, OrderStatus, Store
 from app.schemas.domain import (
     AmountUpdateIn,
     CreditAdjustIn,
@@ -26,12 +26,35 @@ from app.schemas.domain import (
     CustomerOut,
     DailyMetric,
     DashboardSummary,
+    DeliveryAgentCreateIn,
+    DeliveryAgentOut,
+    DeliveryAssignmentIn,
+    DeliveryAssignmentOut,
+    DeliveryAssignmentStatusIn,
     IngestMessageIn,
     InputMethodStat,
     LedgerEntryOut,
+    LoginIn,
+    OperatorCreateIn,
+    OperatorOut,
     OrderOut,
+    OutboundConfirmationIn,
+    OutboundMessageOut,
+    PaymentOut,
+    RouteStop,
     StatusUpdateIn,
+    StoreCreateIn,
+    StoreOut,
     TopItem,
+    TokenOut,
+    UpiWebhookIn,
+)
+from app.services.auth import (
+    authenticate_operator,
+    create_access_token,
+    create_operator,
+    current_store_id,
+    ensure_default_store,
 )
 from app.services.adapters import validate_twilio_signature
 from app.services.ingestion import (
@@ -51,9 +74,19 @@ from app.services.ingestion import (
     update_order_status,
     _is_dormant,
 )
+from app.services.operations import (
+    assign_delivery,
+    create_delivery_agent,
+    create_outbound_confirmation,
+    list_delivery_agents,
+    reconcile_upi_payment,
+    route_for_agent,
+    update_delivery_status,
+)
 
 router = APIRouter()
 DbDep = Annotated[Session, Depends(get_db)]
+StoreDep = Annotated[int, Depends(current_store_id)]
 
 
 # ── Health ─────────────────────────────────────────────────────────────────────
@@ -63,22 +96,56 @@ def health() -> dict:
     return {"status": "ok", "service": get_settings().app_name}
 
 
+# ── Stores / operators ────────────────────────────────────────────────────────
+
+@router.post("/stores", response_model=StoreOut, status_code=201)
+def create_store(payload: StoreCreateIn, db: DbDep):
+    existing = db.query(Store).filter(Store.slug == payload.slug).first()
+    if existing:
+        raise HTTPException(status_code=409, detail="Store slug already exists")
+    store = Store(**payload.model_dump())
+    db.add(store)
+    db.commit()
+    db.refresh(store)
+    return store
+
+
+@router.get("/stores/current", response_model=StoreOut)
+def current_store(db: DbDep, store_id: StoreDep):
+    store = db.get(Store, store_id) or ensure_default_store(db)
+    return store
+
+
+@router.post("/operators", response_model=OperatorOut, status_code=201)
+def register_operator(payload: OperatorCreateIn, db: DbDep):
+    try:
+        return create_operator(db, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/auth/login", response_model=TokenOut)
+def login(payload: LoginIn, db: DbDep):
+    operator = authenticate_operator(db, payload.username, payload.password, payload.store_id)
+    return TokenOut(access_token=create_access_token(operator), operator=operator)
+
+
 # ── Dashboard ──────────────────────────────────────────────────────────────────
 
 @router.get("/dashboard/summary", response_model=DashboardSummary)
-def summary(db: DbDep):
-    return dashboard_summary(db)
+def summary(db: DbDep, store_id: StoreDep):
+    return dashboard_summary(db, store_id=store_id)
 
 
 # ── Ingestion ──────────────────────────────────────────────────────────────────
 
 @router.post("/ingest/messages", response_model=OrderOut, status_code=201)
-async def ingest(payload: IngestMessageIn, db: DbDep):
+async def ingest(payload: IngestMessageIn, db: DbDep, store_id: StoreDep):
     """
     Normalised ingest endpoint. All provider adapters (Twilio, Meta) map their
     payloads to IngestMessageIn before calling this.
     """
-    return await ingest_message(db, payload)
+    return await ingest_message(db, payload.model_copy(update={"store_id": store_id}))
 
 
 # ── WhatsApp Webhooks ──────────────────────────────────────────────────────────
@@ -150,34 +217,51 @@ async def receive_twilio_whatsapp(
 @router.get("/orders", response_model=list[OrderOut])
 def orders(
     db:          DbDep,
+    store_id:    StoreDep,
     status:      OrderStatus | None = Query(default=None),
     customer_id: int | None         = Query(default=None),
     limit:       int                = Query(default=100, le=500),
     offset:      int                = Query(default=0),
 ):
-    return list_orders(db, status=status, customer_id=customer_id, limit=limit, offset=offset)
+    return list_orders(
+        db, status=status, customer_id=customer_id, limit=limit, offset=offset, store_id=store_id
+    )
 
 
 @router.get("/orders/{order_id}", response_model=OrderOut)
-def order_detail(order_id: int, db: DbDep):
+def order_detail(order_id: int, db: DbDep, store_id: StoreDep):
     try:
-        return get_order(db, order_id)
+        return get_order(db, order_id, store_id=store_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.patch("/orders/{order_id}/status", response_model=OrderOut)
-def set_order_status(order_id: int, payload: StatusUpdateIn, db: DbDep):
+def set_order_status(order_id: int, payload: StatusUpdateIn, db: DbDep, store_id: StoreDep):
     try:
-        return update_order_status(db, order_id, payload.status)
+        return update_order_status(db, order_id, payload.status, store_id=store_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.patch("/orders/{order_id}/amount", response_model=OrderOut)
-def set_order_amount(order_id: int, payload: AmountUpdateIn, db: DbDep):
+def set_order_amount(order_id: int, payload: AmountUpdateIn, db: DbDep, store_id: StoreDep):
     try:
-        return update_order_amount(db, order_id, payload)
+        return update_order_amount(db, order_id, payload, store_id=store_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/orders/{order_id}/confirmations", response_model=OutboundMessageOut, status_code=201)
+def send_order_confirmation(
+    order_id: int,
+    payload: OutboundConfirmationIn,
+    db: DbDep,
+    store_id: StoreDep,
+):
+    try:
+        order = get_order(db, order_id, store_id=store_id)
+        return create_outbound_confirmation(db, order, payload)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -187,10 +271,11 @@ def set_order_amount(order_id: int, payload: AmountUpdateIn, db: DbDep):
 @router.get("/customers", response_model=list[CustomerOut])
 def customers(
     db:           DbDep,
+    store_id:     StoreDep,
     dormant_only: bool = Query(default=False),
 ):
     result = []
-    for c in list_customers(db, dormant_only=dormant_only):
+    for c in list_customers(db, dormant_only=dormant_only, store_id=store_id):
         out = CustomerOut.model_validate(c)
         out.dormant = _is_dormant(c.last_order_at)
         result.append(out)
@@ -198,9 +283,9 @@ def customers(
 
 
 @router.post("/customers", response_model=CustomerOut, status_code=201)
-def add_customer(payload: CustomerCreateIn, db: DbDep):
+def add_customer(payload: CustomerCreateIn, db: DbDep, store_id: StoreDep):
     try:
-        c = create_customer(db, payload)
+        c = create_customer(db, payload, store_id=store_id)
         out = CustomerOut.model_validate(c)
         out.dormant = _is_dormant(c.last_order_at)
         return out
@@ -209,9 +294,9 @@ def add_customer(payload: CustomerCreateIn, db: DbDep):
 
 
 @router.get("/customers/{customer_id}", response_model=CustomerOut)
-def customer_detail(customer_id: int, db: DbDep):
+def customer_detail(customer_id: int, db: DbDep, store_id: StoreDep):
     try:
-        c, dormant = get_customer_with_dormant(db, customer_id)
+        c, dormant = get_customer_with_dormant(db, customer_id, store_id=store_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     out = CustomerOut.model_validate(c)
@@ -220,9 +305,9 @@ def customer_detail(customer_id: int, db: DbDep):
 
 
 @router.post("/customers/{customer_id}/credit", response_model=CustomerOut)
-def credit(customer_id: int, payload: CreditAdjustIn, db: DbDep):
+def credit(customer_id: int, payload: CreditAdjustIn, db: DbDep, store_id: StoreDep):
     try:
-        c = adjust_credit(db, customer_id, payload)
+        c = adjust_credit(db, customer_id, payload, store_id=store_id)
         out = CustomerOut.model_validate(c)
         out.dormant = _is_dormant(c.last_order_at)
         return out
@@ -231,9 +316,9 @@ def credit(customer_id: int, payload: CreditAdjustIn, db: DbDep):
 
 
 @router.get("/customers/{customer_id}/ledger", response_model=list[LedgerEntryOut])
-def ledger(customer_id: int, db: DbDep):
+def ledger(customer_id: int, db: DbDep, store_id: StoreDep):
     try:
-        return get_ledger(db, customer_id)
+        return get_ledger(db, customer_id, store_id=store_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -241,19 +326,73 @@ def ledger(customer_id: int, db: DbDep):
 # ── Analytics ──────────────────────────────────────────────────────────────────
 
 @router.get("/analytics/daily", response_model=list[DailyMetric])
-def analytics_daily(db: DbDep, days: int = Query(default=7, le=90)):
-    return daily_metrics(db, days=days)
+def analytics_daily(db: DbDep, store_id: StoreDep, days: int = Query(default=7, le=90)):
+    return daily_metrics(db, days=days, store_id=store_id)
 
 
 @router.get("/analytics/top-items", response_model=list[TopItem])
 def analytics_top_items(
     db:    DbDep,
+    store_id: StoreDep,
     days:  int = Query(default=30, le=365),
     limit: int = Query(default=10, le=50),
 ):
-    return top_items(db, days=days, limit=limit)
+    return top_items(db, days=days, limit=limit, store_id=store_id)
 
 
 @router.get("/analytics/input-methods", response_model=list[InputMethodStat])
-def analytics_input_methods(db: DbDep, days: int = Query(default=30, le=365)):
-    return input_method_stats(db, days=days)
+def analytics_input_methods(db: DbDep, store_id: StoreDep, days: int = Query(default=30, le=365)):
+    return input_method_stats(db, days=days, store_id=store_id)
+
+
+# ── Delivery ─────────────────────────────────────────────────────────────────
+
+@router.post("/delivery/agents", response_model=DeliveryAgentOut, status_code=201)
+def add_delivery_agent(payload: DeliveryAgentCreateIn, db: DbDep, store_id: StoreDep):
+    return create_delivery_agent(db, store_id, payload)
+
+
+@router.get("/delivery/agents", response_model=list[DeliveryAgentOut])
+def delivery_agents(db: DbDep, store_id: StoreDep):
+    return list_delivery_agents(db, store_id)
+
+
+@router.post("/orders/{order_id}/delivery", response_model=DeliveryAssignmentOut, status_code=201)
+def assign_order_delivery(
+    order_id: int,
+    payload: DeliveryAssignmentIn,
+    db: DbDep,
+    store_id: StoreDep,
+):
+    try:
+        return assign_delivery(db, store_id, order_id, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.patch("/delivery/assignments/{assignment_id}/status", response_model=DeliveryAssignmentOut)
+def set_delivery_status(
+    assignment_id: int,
+    payload: DeliveryAssignmentStatusIn,
+    db: DbDep,
+    store_id: StoreDep,
+):
+    try:
+        return update_delivery_status(db, store_id, assignment_id, payload.status)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/delivery/agents/{agent_id}/route", response_model=list[RouteStop])
+def delivery_route(agent_id: int, db: DbDep, store_id: StoreDep):
+    return route_for_agent(db, store_id, agent_id)
+
+
+# ── Payments ─────────────────────────────────────────────────────────────────
+
+@router.post("/payments/upi/webhook", response_model=PaymentOut, status_code=201)
+def upi_webhook(payload: UpiWebhookIn, db: DbDep, store_id: StoreDep):
+    try:
+        return reconcile_upi_payment(db, store_id, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc

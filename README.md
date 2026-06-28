@@ -45,7 +45,10 @@ kiranaos/
 │   │   ├── schemas/domain.py      # Pydantic request/response schemas
 │   │   ├── services/
 │   │   │   ├── ingestion.py       # Core business logic (orders, customers, ledger)
+│   │   │   ├── auth.py            # Operator auth, JWT issuance, store scope
+│   │   │   ├── operations.py      # Delivery, outbound confirmation, UPI reconciliation
 │   │   │   ├── parser.py          # Text → [ParsedItem] (pure function, no I/O)
+│   │   │   ├── voice.py           # Voice note transcription adapter
 │   │   │   └── ocr/
 │   │   │       └── google_vision.py  # OCR adapter for handwritten photos
 │   │   └── main.py                # FastAPI app factory
@@ -53,6 +56,8 @@ kiranaos/
 │   │   ├── test_parser.py         # Parser unit tests (14 cases, pure function)
 │   │   └── test_api.py            # API integration tests (in-memory SQLite)
 │   ├── Dockerfile
+│   ├── alembic/                   # Production migration baseline
+│   ├── alembic.ini
 │   ├── pyproject.toml
 │   └── .env.example
 │
@@ -85,6 +90,14 @@ All endpoints are prefixed `/api`. Auto-generated docs at `/docs` (Swagger) and 
 |---|---|---|
 | `GET` | `/dashboard/summary` | Single-call load: pending, packed, delivered today, needs_review, dormant, total credit |
 
+### Stores & Operators
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/stores` | Create a store / franchise tenant |
+| `GET` | `/stores/current` | Resolve the active store scope |
+| `POST` | `/operators` | Create an operator account |
+| `POST` | `/auth/login` | Issue an HS256 JWT for an operator |
+
 ### Orders
 | Method | Path | Description |
 |---|---|---|
@@ -92,6 +105,7 @@ All endpoints are prefixed `/api`. Auto-generated docs at `/docs` (Swagger) and 
 | `GET` | `/orders/{id}` | Single order with customer + items |
 | `PATCH` | `/orders/{id}/status` | Advance: pending → packed → delivered |
 | `PATCH` | `/orders/{id}/amount` | Set amount and udhaari flag |
+| `POST` | `/orders/{id}/confirmations` | Record/send outbound WhatsApp order confirmation |
 
 ### Customers
 | Method | Path | Description |
@@ -117,6 +131,20 @@ All endpoints are prefixed `/api`. Auto-generated docs at `/docs` (Swagger) and 
 | `GET` | `/analytics/top-items?days=30` | Most ordered items with total quantity |
 | `GET` | `/analytics/input-methods` | Breakdown by text / image / voice |
 
+### Delivery
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/delivery/agents` | Create a delivery agent |
+| `GET` | `/delivery/agents` | List active delivery agents |
+| `POST` | `/orders/{id}/delivery` | Assign an order to an agent with route order |
+| `PATCH` | `/delivery/assignments/{id}/status` | Update assignment lifecycle |
+| `GET` | `/delivery/agents/{id}/route` | Route-ordered delivery stop list |
+
+### Payments
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/payments/upi/webhook` | Reconcile UPI payment events to customer credit/order state |
+
 ---
 
 ## Configuration
@@ -126,12 +154,19 @@ All settings use the `KIRANA_` prefix. Copy `backend/.env.example` to `backend/.
 | Variable | Default | Description |
 |---|---|---|
 | `KIRANA_DATABASE_URL` | `sqlite:///./data/kiranaos.db` | SQLite for dev; set to `postgresql://...` for production |
+| `KIRANA_DEFAULT_STORE_ID` | `1` | Store scope used in demo mode and unauthenticated local development |
 | `KIRANA_WHATSAPP_VERIFY_TOKEN` | `change-me` | Secret token for Meta webhook verification |
 | `KIRANA_PUBLIC_BASE_URL` | `http://localhost:8000` | Public API origin used for Twilio signature validation |
 | `KIRANA_TWILIO_AUTH_TOKEN` | — | Twilio auth token; when set, webhook signatures are enforced |
+| `KIRANA_TWILIO_ACCOUNT_SID` | — | Twilio account SID for outbound WhatsApp |
+| `KIRANA_TWILIO_WHATSAPP_FROM` | — | Twilio WhatsApp sender number |
 | `KIRANA_FRONTEND_ORIGIN` | `*` | CORS origin; set to your frontend domain in production |
+| `KIRANA_AUTH_REQUIRED` | `false` | Require bearer JWTs for store-scoped API routes |
+| `KIRANA_JWT_SECRET` | `change-me` | HS256 JWT signing secret |
+| `KIRANA_JWT_EXPIRY_MINUTES` | `480` | Operator session lifetime |
 | `KIRANA_GOOGLE_VISION_KEY_JSON` | — | GCP service account JSON (for OCR) |
-| `KIRANA_OPENAI_API_KEY` | — | Optional parser enhancement for long-tail multilingual orders |
+| `KIRANA_OPENAI_API_KEY` | — | Optional parser enhancement and voice note transcription |
+| `KIRANA_OPENAI_TRANSCRIPTION_MODEL` | `whisper-1` | Audio transcription model used for voice notes |
 | `KIRANA_LOG_LEVEL` | `INFO` | Python logging level |
 
 ---
@@ -197,28 +232,29 @@ Tests use an in-memory SQLite database. No credentials or external services requ
 ### Production database (Postgres)
 
 Set `KIRANA_DATABASE_URL=postgresql://user:pass@host:5432/kiranaos`.
-Add Alembic for schema migrations before going live:
+Run the included Alembic migration baseline before going live:
 
 ```bash
-cd backend
-pip install alembic
-alembic init alembic
-# configure alembic.ini to use KIRANA_DATABASE_URL
-alembic revision --autogenerate -m "initial"
-alembic upgrade head
+make migrate
 ```
 
 ---
 
 ## Roadmap
 
-- [ ] Voice note transcription (OpenAI Whisper or Google Speech-to-Text)
-- [ ] Outbound WhatsApp confirmations ("Order packed, Sunita ji! 🎉")
-- [ ] Delivery boy assignment + route optimisation
-- [ ] UPI payment webhook reconciliation
-- [ ] Alembic migrations for production schema management
-- [ ] Multi-store / franchise support (`store_id` on all models)
-- [ ] Operator authentication (JWT)
+- [x] Voice note transcription through a configurable OpenAI audio adapter, with safe `needs_review` fallback when no key is configured
+- [x] Outbound WhatsApp confirmation records for order lifecycle events, simulated locally and ready for provider dispatch
+- [x] Delivery assignment, delivery status lifecycle, and route-ordered agent stop lists
+- [x] UPI payment webhook reconciliation against customer credit and order state
+- [x] Alembic migration baseline for production schema management
+- [x] Multi-store / franchise support with `store_id` on operational models and store-scoped service queries
+- [x] Operator authentication with HS256 JWTs and optional production enforcement
+
+### Next release candidates
+
+- [ ] Provider-specific outbound WhatsApp dispatch for Twilio and Meta Cloud API
+- [ ] Map-based route optimisation using geocoded addresses
+- [ ] Role-based permissions beyond store-level JWT scope
 
 ---
 

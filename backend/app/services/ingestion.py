@@ -15,6 +15,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
+from app.core.config import get_settings
 from app.models.domain import (
     Customer,
     InboundMessage,
@@ -33,6 +34,7 @@ from app.schemas.domain import (
 )
 from app.services.adapters import extract_items_with_openai
 from app.services.parser import parse_order_text
+from app.services.auth import ensure_default_store
 
 logger = logging.getLogger(__name__)
 
@@ -54,12 +56,20 @@ def _is_dormant(last_order_at: datetime | None) -> bool:
 
 # ── Customer ──────────────────────────────────────────────────────────────────
 
-def find_or_create_customer(db: Session, payload: IngestMessageIn) -> Customer:
+def _store_id(payload_store_id: int | None = None) -> int:
+    return payload_store_id or get_settings().default_store_id
+
+
+def find_or_create_customer(db: Session, payload: IngestMessageIn, store_id: int | None = None) -> Customer:
     """
     Upsert on phone number. Updates name/building if previously unknown.
     Never overwrites an existing real name with 'Unknown customer'.
     """
-    customer = db.scalar(select(Customer).where(Customer.phone == payload.phone))
+    ensure_default_store(db)
+    scoped_store_id = _store_id(store_id or payload.store_id)
+    customer = db.scalar(
+        select(Customer).where(Customer.store_id == scoped_store_id, Customer.phone == payload.phone)
+    )
 
     if customer:
         if payload.customer_name and customer.name == "Unknown customer":
@@ -71,6 +81,7 @@ def find_or_create_customer(db: Session, payload: IngestMessageIn) -> Customer:
         return customer
 
     customer = Customer(
+        store_id=scoped_store_id,
         phone=payload.phone,
         name=payload.customer_name or "Unknown customer",
         building=payload.building,
@@ -82,11 +93,16 @@ def find_or_create_customer(db: Session, payload: IngestMessageIn) -> Customer:
     return customer
 
 
-def create_customer(db: Session, data: CustomerCreateIn) -> Customer:
-    existing = db.scalar(select(Customer).where(Customer.phone == data.phone))
+def create_customer(db: Session, data: CustomerCreateIn, store_id: int | None = None) -> Customer:
+    ensure_default_store(db)
+    scoped_store_id = _store_id(store_id or data.store_id)
+    existing = db.scalar(
+        select(Customer).where(Customer.store_id == scoped_store_id, Customer.phone == data.phone)
+    )
     if existing:
         raise ValueError(f"Phone {data.phone} already registered to customer {existing.id}")
     customer = Customer(
+        store_id=scoped_store_id,
         name=data.name,
         phone=data.phone,
         building=data.building,
@@ -98,15 +114,20 @@ def create_customer(db: Session, data: CustomerCreateIn) -> Customer:
     return customer
 
 
-def get_customer(db: Session, customer_id: int) -> Customer:
-    c = db.scalar(select(Customer).where(Customer.id == customer_id))
+def get_customer(db: Session, customer_id: int, store_id: int | None = None) -> Customer:
+    stmt = select(Customer).where(Customer.id == customer_id)
+    if store_id is not None:
+        stmt = stmt.where(Customer.store_id == store_id)
+    c = db.scalar(stmt)
     if not c:
         raise ValueError(f"Customer {customer_id} not found")
     return c
 
 
-def list_customers(db: Session, dormant_only: bool = False) -> list[Customer]:
+def list_customers(db: Session, dormant_only: bool = False, store_id: int | None = None) -> list[Customer]:
     stmt = select(Customer).order_by(Customer.name)
+    if store_id is not None:
+        stmt = stmt.where(Customer.store_id == store_id)
     if dormant_only:
         stmt = stmt.where(
             (Customer.last_order_at.is_(None))
@@ -115,8 +136,8 @@ def list_customers(db: Session, dormant_only: bool = False) -> list[Customer]:
     return list(db.scalars(stmt).all())
 
 
-def get_customer_with_dormant(db: Session, customer_id: int) -> tuple[Customer, bool]:
-    c = get_customer(db, customer_id)
+def get_customer_with_dormant(db: Session, customer_id: int, store_id: int | None = None) -> tuple[Customer, bool]:
+    c = get_customer(db, customer_id, store_id=store_id)
     return c, _is_dormant(c.last_order_at)
 
 
@@ -132,7 +153,9 @@ async def ingest_message(db: Session, payload: IngestMessageIn) -> Order:
       5. Create Order + OrderItems.
       6. Update customer.last_order_at.
     """
-    customer = find_or_create_customer(db, payload)
+    ensure_default_store(db)
+    scoped_store_id = _store_id(payload.store_id)
+    customer = find_or_create_customer(db, payload, store_id=scoped_store_id)
 
     text = payload.text
 
@@ -145,10 +168,14 @@ async def ingest_message(db: Session, payload: IngestMessageIn) -> Order:
             except Exception as exc:
                 logger.warning("OCR unavailable: %s", exc)
         elif payload.message_type == MessageType.voice:
-            logger.info("Voice transcription not configured — order set to needs_review")
+            from app.services.voice import transcribe_voice_note
+            text = await transcribe_voice_note(payload.media_url, payload.media_type)
+            if not text:
+                logger.info("Voice transcription not configured or failed — order set to needs_review")
 
     message = InboundMessage(
         customer_id=customer.id,
+        store_id=scoped_store_id,
         source=payload.source,
         external_message_id=payload.external_message_id,
         message_type=payload.message_type,
@@ -180,6 +207,7 @@ async def ingest_message(db: Session, payload: IngestMessageIn) -> Order:
 
     order = Order(
         customer_id=customer.id,
+        store_id=scoped_store_id,
         message_id=message.id,
         status=status,
         notes=notes,
@@ -208,10 +236,12 @@ async def ingest_message(db: Session, payload: IngestMessageIn) -> Order:
 
 # ── Order queries ─────────────────────────────────────────────────────────────
 
-def _load_order(db: Session, order_id: int) -> Order:
+def _load_order(db: Session, order_id: int, store_id: int | None = None) -> Order:
+    stmt = select(Order).where(Order.id == order_id)
+    if store_id is not None:
+        stmt = stmt.where(Order.store_id == store_id)
     order = db.scalar(
-        select(Order)
-        .where(Order.id == order_id)
+        stmt
         .options(
             selectinload(Order.customer),
             selectinload(Order.items),
@@ -222,8 +252,8 @@ def _load_order(db: Session, order_id: int) -> Order:
     return order
 
 
-def get_order(db: Session, order_id: int) -> Order:
-    return _load_order(db, order_id)
+def get_order(db: Session, order_id: int, store_id: int | None = None) -> Order:
+    return _load_order(db, order_id, store_id=store_id)
 
 
 def list_orders(
@@ -232,6 +262,7 @@ def list_orders(
     customer_id: int | None = None,
     limit: int = 100,
     offset: int = 0,
+    store_id: int | None = None,
 ) -> list[Order]:
     stmt = (
         select(Order)
@@ -244,34 +275,36 @@ def list_orders(
         stmt = stmt.where(Order.status == status)
     if customer_id:
         stmt = stmt.where(Order.customer_id == customer_id)
+    if store_id is not None:
+        stmt = stmt.where(Order.store_id == store_id)
     return list(db.scalars(stmt).all())
 
 
-def update_order_status(db: Session, order_id: int, status: OrderStatus) -> Order:
-    order = _load_order(db, order_id)
+def update_order_status(db: Session, order_id: int, status: OrderStatus, store_id: int | None = None) -> Order:
+    order = _load_order(db, order_id, store_id=store_id)
     order.status = status
     if status == OrderStatus.delivered:
         order.delivered_at = datetime.now(timezone.utc)
     db.commit()
-    return _load_order(db, order_id)
+    return _load_order(db, order_id, store_id=store_id)
 
 
-def update_order_amount(db: Session, order_id: int, data: AmountUpdateIn) -> Order:
-    order = _load_order(db, order_id)
+def update_order_amount(db: Session, order_id: int, data: AmountUpdateIn, store_id: int | None = None) -> Order:
+    order = _load_order(db, order_id, store_id=store_id)
     order.amount_due = data.amount_due
     order.is_credit  = data.is_credit
     db.commit()
-    return _load_order(db, order_id)
+    return _load_order(db, order_id, store_id=store_id)
 
 
 # ── Udhaari / credit ledger ───────────────────────────────────────────────────
 
-def adjust_credit(db: Session, customer_id: int, data: CreditAdjustIn) -> Customer:
+def adjust_credit(db: Session, customer_id: int, data: CreditAdjustIn, store_id: int | None = None) -> Customer:
     """
     Record a credit adjustment. Positive = udhaari extended. Negative = payment received.
     Prevents the balance from going below zero on payment (you cannot collect more than owed).
     """
-    customer = get_customer(db, customer_id)
+    customer = get_customer(db, customer_id, store_id=store_id)
 
     if data.amount < 0:
         # Payment — cap at what's actually owed
@@ -282,6 +315,7 @@ def adjust_credit(db: Session, customer_id: int, data: CreditAdjustIn) -> Custom
     customer.credit_balance = round(customer.credit_balance + actual, 2)
     db.add(LedgerEntry(
         customer_id=customer_id,
+        store_id=customer.store_id,
         amount=actual,
         reason=data.reason,
     ))
@@ -294,27 +328,32 @@ def adjust_credit(db: Session, customer_id: int, data: CreditAdjustIn) -> Custom
     return customer
 
 
-def get_ledger(db: Session, customer_id: int) -> list[LedgerEntry]:
+def get_ledger(db: Session, customer_id: int, store_id: int | None = None) -> list[LedgerEntry]:
+    get_customer(db, customer_id, store_id=store_id)
     return list(db.scalars(
         select(LedgerEntry)
         .where(LedgerEntry.customer_id == customer_id)
+        .where(LedgerEntry.store_id == store_id if store_id is not None else True)
         .order_by(LedgerEntry.created_at.desc())
     ).all())
 
 
 # ── Dashboard summary ─────────────────────────────────────────────────────────
 
-def dashboard_summary(db: Session) -> dict:
+def dashboard_summary(db: Session, store_id: int | None = None) -> dict:
     today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
 
     status_counts = dict(
         db.execute(
-            select(Order.status, func.count(Order.id)).group_by(Order.status)
+            select(Order.status, func.count(Order.id))
+            .where(Order.store_id == store_id if store_id is not None else True)
+            .group_by(Order.status)
         ).all()
     )
 
     dormant = db.scalar(
         select(func.count(Customer.id)).where(
+            (Customer.store_id == store_id if store_id is not None else True),
             (Customer.last_order_at.is_(None))
             | (Customer.last_order_at < dormant_cutoff())
         )
@@ -323,12 +362,14 @@ def dashboard_summary(db: Session) -> dict:
     delivered_today = db.scalar(
         select(func.count(Order.id)).where(
             Order.status == OrderStatus.delivered,
+            Order.store_id == store_id if store_id is not None else True,
             Order.delivered_at >= today_start,
         )
     ) or 0
 
     total_credit = db.scalar(
         select(func.coalesce(func.sum(Customer.credit_balance), 0.0))
+        .where(Customer.store_id == store_id if store_id is not None else True)
     ) or 0.0
 
     return {
@@ -343,7 +384,7 @@ def dashboard_summary(db: Session) -> dict:
 
 # ── Analytics ─────────────────────────────────────────────────────────────────
 
-def daily_metrics(db: Session, days: int = 7) -> list[dict]:
+def daily_metrics(db: Session, days: int = 7, store_id: int | None = None) -> list[dict]:
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     rows = db.execute(
         select(
@@ -351,14 +392,18 @@ def daily_metrics(db: Session, days: int = 7) -> list[dict]:
             func.count(Order.id).label("orders"),
             func.coalesce(func.sum(Order.amount_due), 0.0).label("revenue"),
         )
-        .where(Order.created_at >= cutoff, Order.status != OrderStatus.cancelled)
+        .where(
+            Order.created_at >= cutoff,
+            Order.status != OrderStatus.cancelled,
+            Order.store_id == store_id if store_id is not None else True,
+        )
         .group_by("day")
         .order_by("day")
     ).all()
     return [{"day": str(r.day), "orders": r.orders, "revenue": float(r.revenue)} for r in rows]
 
 
-def top_items(db: Session, days: int = 30, limit: int = 10) -> list[dict]:
+def top_items(db: Session, days: int = 30, limit: int = 10, store_id: int | None = None) -> list[dict]:
     """
     Uses the normalised order_items table — not possible with JSON blob storage.
     Returns item name, order count, and total quantity ordered.
@@ -371,7 +416,11 @@ def top_items(db: Session, days: int = 30, limit: int = 10) -> list[dict]:
             func.sum(OrderItem.quantity).label("total_quantity"),
         )
         .join(Order, OrderItem.order_id == Order.id)
-        .where(Order.created_at >= cutoff, Order.status != OrderStatus.cancelled)
+        .where(
+            Order.created_at >= cutoff,
+            Order.status != OrderStatus.cancelled,
+            Order.store_id == store_id if store_id is not None else True,
+        )
         .group_by(OrderItem.name)
         .order_by(func.count(OrderItem.id).desc())
         .limit(limit)
@@ -382,14 +431,17 @@ def top_items(db: Session, days: int = 30, limit: int = 10) -> list[dict]:
     ]
 
 
-def input_method_stats(db: Session, days: int = 30) -> list[dict]:
+def input_method_stats(db: Session, days: int = 30, store_id: int | None = None) -> list[dict]:
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     rows = db.execute(
         select(
             InboundMessage.message_type,
             func.count(InboundMessage.id).label("count"),
         )
-        .where(InboundMessage.received_at >= cutoff)
+        .where(
+            InboundMessage.received_at >= cutoff,
+            InboundMessage.store_id == store_id if store_id is not None else True,
+        )
         .group_by(InboundMessage.message_type)
         .order_by(func.count(InboundMessage.id).desc())
     ).all()

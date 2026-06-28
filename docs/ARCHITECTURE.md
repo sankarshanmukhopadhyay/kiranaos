@@ -21,12 +21,14 @@ WhatsApp customer
 │    └─► ingestion.py                  │
 │          ├─ find_or_create_customer   │  ← upsert on phone number
 │          ├─ OCR adapter (optional)    │  ← Google Vision for photos
+│          ├─ voice adapter (optional)  │  ← OpenAI audio transcription
 │          ├─ parser.py                 │  ← text → [ParsedItem]
 │          └─ creates Order + Items     │  ← normalised, queryable
 │                                       │
 │  REST API                             │
 │    /orders     /customers             │
 │    /analytics  /dashboard/summary     │
+│    /delivery   /payments              │
 └──────────────┬───────────────────────┘
                │  fetch()
        ┌───────▼───────┐
@@ -44,8 +46,13 @@ WhatsApp customer
 | `needs_review` OrderStatus | Honest state for image/voice orders with no text yet; not a flag |
 | `LedgerEntry` audit log | Every credit movement is recorded; `credit_balance` is the running sum |
 | `InboundMessage` provider metadata | Preserves source, external message id, media type, extracted text, and parse status |
-| `find_or_create_customer` upsert | Phone is the identity key; no duplicate customers across messages |
-| SQLite default → Postgres in prod | Zero setup for development; `KIRANA_DATABASE_URL` swap for production |
+| `Store` scope on operational records | Enables franchise / multi-store isolation without changing customer behavior |
+| `Operator` JWTs | Keeps production access scoped to a store while preserving frictionless demo mode |
+| `OutboundMessage` records | Confirms customer communication as an auditable operational event |
+| `DeliveryAssignment` records | Separates packing from fulfilment and gives delivery agents route-ordered work |
+| `Payment` records | Reconciles UPI provider events to credit balances with immutable ledger entries |
+| `find_or_create_customer` upsert | Phone is the identity key within a store; no duplicate customers across messages |
+| SQLite default → Postgres in prod | Zero setup for development; `KIRANA_DATABASE_URL` swap plus Alembic for production |
 
 ## Ingestion pipeline
 
@@ -54,7 +61,7 @@ IngestMessageIn (normalised payload)
     │
     ├── message_type = text   →  parse_order_text(text)
     ├── message_type = image  →  OCR adapter → parse_order_text(ocr_text)
-    └── message_type = voice  →  [STT adapter, not yet configured]
+    └── message_type = voice  →  OpenAI transcription adapter, if configured
                                    → parse_order_text(transcript)
 
 parse_order_text returns [ParsedItem(name, quantity, unit, confidence)]
@@ -62,6 +69,18 @@ parse_order_text returns [ParsedItem(name, quantity, unit, confidence)]
 If parsed_items is empty   →  Order.status = needs_review
 If parsed_items present    →  Order.status = pending
 ```
+
+## Control surfaces
+
+KiranaOS treats each operational step as an auditable record, not an implicit UI state.
+
+| Capability | Authority boundary | Evidence produced |
+|---|---|---|
+| Store tenancy | `store_id` on customers, messages, orders, ledger, delivery, payments | Store-scoped query results and JWT store claim |
+| Operator auth | `/operators` creates accounts; `/auth/login` issues JWT | Signed token with operator id, role, store id, expiry |
+| Outbound confirmation | `/orders/{id}/confirmations` records customer notice | `OutboundMessage` with destination, body, provider, status, sent time |
+| Delivery fulfilment | `/orders/{id}/delivery` and assignment status updates | `DeliveryAssignment` with agent, route order, lifecycle state |
+| UPI reconciliation | `/payments/upi/webhook` applies provider events | `Payment` plus negative `LedgerEntry` against udhaari balance |
 
 ## Parser design
 
@@ -79,10 +98,9 @@ It handles:
 ## Production notes
 
 - Replace SQLite with Postgres by setting `KIRANA_DATABASE_URL=postgresql://...`
-- Add Alembic for schema migrations before going multi-store
+- Run `make migrate` before serving production traffic
 - Attach Google Vision to the OCR adapter: set `KIRANA_GOOGLE_VISION_KEY_JSON`
+- Configure `KIRANA_OPENAI_API_KEY` to transcribe voice notes and improve long-tail parsing
 - Configure `KIRANA_TWILIO_AUTH_TOKEN` and `KIRANA_PUBLIC_BASE_URL` before exposing Twilio webhooks
-- Configure `KIRANA_OPENAI_API_KEY` only if the heuristic parser needs long-tail language support
-- Add operator authentication (JWT or session) before public deployment
-- Consider per-store multi-tenancy: add `store_id` FK to Customer and Order
+- Set `KIRANA_AUTH_REQUIRED=true` and create an operator before public deployment
 - Keep raw media retention short; document customer consent expectations
