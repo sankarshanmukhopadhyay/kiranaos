@@ -1,6 +1,6 @@
 [project]
 name = "kiranaos-api"
-version = "2.1.0"
+version = "2.1.1"
 description = "WhatsApp-native order management for kirana stores"
 requires-python = ">=3.11"
 dependencies = [

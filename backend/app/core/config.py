@@ -9,14 +9,17 @@ class Settings(BaseSettings):
     default_store_id:        int  = 1
     whatsapp_verify_token:  str  = "change-me-before-deploy"
     public_base_url:        str  = "http://localhost:8000"
-    frontend_origin:        str  = "*"
+    frontend_origin:        str  = "http://localhost:5173"
     twilio_auth_token:      str | None = None
     twilio_account_sid:     str | None = None
     twilio_whatsapp_from:   str | None = None
+    upi_webhook_secret:     str | None = None
+    webhook_timestamp_tolerance_seconds: int = 300
     demo_mode:              bool = True
     auth_required:          bool = False
     jwt_secret:             str  = "change-me-before-deploy"
     jwt_expiry_minutes:     int  = 480
+    password_pbkdf2_iterations: int = 310_000
     log_level:              str  = "INFO"
 
     # External service keys — all optional; features degrade gracefully without them

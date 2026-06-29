@@ -128,7 +128,7 @@ def update_delivery_status(
         raise ValueError(f"Delivery assignment {assignment_id} not found")
     assignment.status = status
     if status == DeliveryStatus.delivered:
-        order = db.get(Order, assignment.order_id)
+        order = db.scalar(select(Order).where(Order.id == assignment.order_id, Order.store_id == store_id))
         if order:
             order.status = OrderStatus.delivered
             order.delivered_at = datetime.now(timezone.utc)
@@ -165,7 +165,7 @@ def route_for_agent(db: Session, store_id: int, agent_id: int) -> list[dict]:
 
 
 def reconcile_upi_payment(db: Session, store_id: int, payload: UpiWebhookIn) -> Payment:
-    existing = db.scalar(select(Payment).where(Payment.provider_ref == payload.provider_ref))
+    existing = db.scalar(select(Payment).where(Payment.store_id == store_id, Payment.provider_ref == payload.provider_ref))
     if existing:
         existing.status = PaymentStatus.duplicate
         db.commit()

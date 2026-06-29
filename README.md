@@ -240,6 +240,22 @@ make migrate
 
 ---
 
+
+### Security hardening
+
+The v2.1.1 hardening release closes the main red-team findings from the operational roadmap release:
+
+- store and operator creation are role-gated when `KIRANA_AUTH_REQUIRED=true`;
+- JWT decoding now validates header claims, expiry, required claims, and signatures defensively;
+- production-style startup fails closed when demo secrets are still configured;
+- Twilio webhook signature bypass is limited to demo mode;
+- UPI webhook callbacks can be HMAC-signed with timestamp replay protection;
+- media URLs are validated before OCR/transcription fetches to reduce SSRF exposure;
+- CORS no longer defaults to wildcard credentials;
+- UPI duplicate detection is scoped by store to avoid cross-tenant leakage.
+
+See [`SECURITY.md`](SECURITY.md) for the production checklist and trust-boundary details.
+
 ## Roadmap
 
 - [x] Voice note transcription through a configurable OpenAI audio adapter, with safe `needs_review` fallback when no key is configured

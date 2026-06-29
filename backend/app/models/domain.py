@@ -273,13 +273,14 @@ class DeliveryAssignment(Base):
 
 class Payment(Base):
     __tablename__ = "payments"
+    __table_args__ = (UniqueConstraint("store_id", "provider_ref", name="uq_payment_store_provider_ref"),)
 
     id:             Mapped[int]           = mapped_column(Integer, primary_key=True)
     store_id:       Mapped[int]           = mapped_column(ForeignKey("stores.id"), default=1, index=True)
     customer_id:    Mapped[int | None]    = mapped_column(ForeignKey("customers.id"), nullable=True, index=True)
     order_id:       Mapped[int | None]    = mapped_column(ForeignKey("orders.id"), nullable=True, index=True)
     provider:       Mapped[str]           = mapped_column(String(40), default="upi")
-    provider_ref:   Mapped[str]           = mapped_column(String(160), unique=True, index=True)
+    provider_ref:   Mapped[str]           = mapped_column(String(160), index=True)
     amount:         Mapped[float]         = mapped_column(Float)
     payer_vpa:      Mapped[str | None]    = mapped_column(String(160), nullable=True)
     status:         Mapped[PaymentStatus] = mapped_column(Enum(PaymentStatus), default=PaymentStatus.received)

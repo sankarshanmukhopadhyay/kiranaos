@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.db.session import get_db
-from app.models.domain import MessageType, OrderStatus, Store
+from app.models.domain import MessageType, Operator, OperatorRole, OrderStatus, Store
 from app.schemas.domain import (
     AmountUpdateIn,
     CreditAdjustIn,
@@ -53,8 +53,11 @@ from app.services.auth import (
     authenticate_operator,
     create_access_token,
     create_operator,
+    decode_access_token,
     current_store_id,
     ensure_default_store,
+    operator_count,
+    require_roles,
 )
 from app.services.adapters import validate_twilio_signature
 from app.services.ingestion import (
@@ -74,6 +77,7 @@ from app.services.ingestion import (
     update_order_status,
     _is_dormant,
 )
+from app.services.security import verify_upi_webhook_signature
 from app.services.operations import (
     assign_delivery,
     create_delivery_agent,
@@ -87,6 +91,8 @@ from app.services.operations import (
 router = APIRouter()
 DbDep = Annotated[Session, Depends(get_db)]
 StoreDep = Annotated[int, Depends(current_store_id)]
+OwnerDep = Annotated[object, Depends(require_roles(OperatorRole.owner))]
+ManagerDep = Annotated[object, Depends(require_roles(OperatorRole.owner, OperatorRole.manager))]
 
 
 # ── Health ─────────────────────────────────────────────────────────────────────
@@ -99,7 +105,7 @@ def health() -> dict:
 # ── Stores / operators ────────────────────────────────────────────────────────
 
 @router.post("/stores", response_model=StoreOut, status_code=201)
-def create_store(payload: StoreCreateIn, db: DbDep):
+def create_store(payload: StoreCreateIn, db: DbDep, _operator: OwnerDep):
     existing = db.query(Store).filter(Store.slug == payload.slug).first()
     if existing:
         raise HTTPException(status_code=409, detail="Store slug already exists")
@@ -117,7 +123,22 @@ def current_store(db: DbDep, store_id: StoreDep):
 
 
 @router.post("/operators", response_model=OperatorOut, status_code=201)
-def register_operator(payload: OperatorCreateIn, db: DbDep):
+def register_operator(
+    payload: OperatorCreateIn,
+    db: DbDep,
+    authorization: str | None = Header(default=None, alias="Authorization"),
+):
+    settings = get_settings()
+    operator = None
+    if settings.auth_required and operator_count(db) > 0:
+        if not authorization or not authorization.lower().startswith("bearer "):
+            raise HTTPException(status_code=401, detail="Operator registration requires owner authentication")
+        claims = decode_access_token(authorization.split(" ", 1)[1])
+        operator = db.get(Operator, int(claims["sub"]))
+        if not operator or operator.role != OperatorRole.owner:
+            raise HTTPException(status_code=403, detail="Operator registration requires owner role")
+        if payload.store_id != operator.store_id:
+            raise HTTPException(status_code=403, detail="Cannot create operators outside current store")
     try:
         return create_operator(db, payload)
     except ValueError as exc:
@@ -237,7 +258,7 @@ def order_detail(order_id: int, db: DbDep, store_id: StoreDep):
 
 
 @router.patch("/orders/{order_id}/status", response_model=OrderOut)
-def set_order_status(order_id: int, payload: StatusUpdateIn, db: DbDep, store_id: StoreDep):
+def set_order_status(order_id: int, payload: StatusUpdateIn, db: DbDep, store_id: StoreDep, _operator: ManagerDep):
     try:
         return update_order_status(db, order_id, payload.status, store_id=store_id)
     except ValueError as exc:
@@ -245,7 +266,7 @@ def set_order_status(order_id: int, payload: StatusUpdateIn, db: DbDep, store_id
 
 
 @router.patch("/orders/{order_id}/amount", response_model=OrderOut)
-def set_order_amount(order_id: int, payload: AmountUpdateIn, db: DbDep, store_id: StoreDep):
+def set_order_amount(order_id: int, payload: AmountUpdateIn, db: DbDep, store_id: StoreDep, _operator: ManagerDep):
     try:
         return update_order_amount(db, order_id, payload, store_id=store_id)
     except ValueError as exc:
@@ -305,7 +326,7 @@ def customer_detail(customer_id: int, db: DbDep, store_id: StoreDep):
 
 
 @router.post("/customers/{customer_id}/credit", response_model=CustomerOut)
-def credit(customer_id: int, payload: CreditAdjustIn, db: DbDep, store_id: StoreDep):
+def credit(customer_id: int, payload: CreditAdjustIn, db: DbDep, store_id: StoreDep, _operator: ManagerDep):
     try:
         c = adjust_credit(db, customer_id, payload, store_id=store_id)
         out = CustomerOut.model_validate(c)
@@ -391,7 +412,17 @@ def delivery_route(agent_id: int, db: DbDep, store_id: StoreDep):
 # ── Payments ─────────────────────────────────────────────────────────────────
 
 @router.post("/payments/upi/webhook", response_model=PaymentOut, status_code=201)
-def upi_webhook(payload: UpiWebhookIn, db: DbDep, store_id: StoreDep):
+async def upi_webhook(
+    request: Request,
+    payload: UpiWebhookIn,
+    db: DbDep,
+    store_id: StoreDep,
+    x_kirana_signature: str | None = Header(default=None, alias="X-Kirana-Signature"),
+    x_kirana_timestamp: str | None = Header(default=None, alias="X-Kirana-Timestamp"),
+):
+    body = await request.body()
+    if not verify_upi_webhook_signature(body, x_kirana_signature, x_kirana_timestamp):
+        raise HTTPException(status_code=403, detail="Invalid UPI webhook signature")
     try:
         return reconcile_upi_payment(db, store_id, payload)
     except ValueError as exc:

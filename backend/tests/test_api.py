@@ -327,3 +327,57 @@ def test_analytics_top_items():
     res = client.get("/api/analytics/top-items")
     assert res.status_code == 200
     assert isinstance(res.json(), list)
+
+# ── Security hardening ───────────────────────────────────────────────────────
+
+def test_unsafe_media_url_is_rejected_to_needs_review_without_fetch():
+    res = client.post("/api/ingest/messages", json={
+        "phone": "+919999990050",
+        "message_type": "voice",
+        "media_url": "http://127.0.0.1:8000/internal.ogg",
+        "media_type": "audio/ogg",
+    })
+    assert res.status_code == 201
+    assert res.json()["status"] == "needs_review"
+
+
+def test_jwt_rejects_tampered_signature():
+    create = client.post("/api/operators", json={
+        "username": "security-owner",
+        "password": "supersecret",
+        "role": "owner",
+    })
+    assert create.status_code == 201
+    login = client.post("/api/auth/login", json={
+        "username": "security-owner",
+        "password": "supersecret",
+    })
+    token = login.json()["access_token"]
+    parts = token.split(".")
+    bad = ".".join([parts[0], parts[1], "tampered"])
+
+    from app.services.auth import decode_access_token
+    from fastapi import HTTPException
+    with pytest.raises(HTTPException):
+        decode_access_token(bad)
+
+
+def test_upi_duplicate_is_scoped_to_current_store():
+    from app.models.domain import Payment
+    from app.schemas.domain import UpiWebhookIn
+    from app.services.operations import reconcile_upi_payment
+
+    store = client.post("/api/stores", json={"name": "Payment Store", "slug": "payment-store"})
+    assert store.status_code == 201
+    second_store_id = store.json()["id"]
+
+    db = SessionLocal()
+    try:
+        first = reconcile_upi_payment(db, 1, UpiWebhookIn(provider_ref="same-ref", amount=100))
+        second = reconcile_upi_payment(db, second_store_id, UpiWebhookIn(provider_ref="same-ref", amount=200))
+        assert first.store_id == 1
+        assert second.store_id == second_store_id
+        assert first.id != second.id
+        assert len(db.query(Payment).filter(Payment.provider_ref == "same-ref").all()) == 2
+    finally:
+        db.close()

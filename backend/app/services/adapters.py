@@ -12,9 +12,10 @@ from app.core.config import get_settings
 
 def validate_twilio_signature(signature: str | None, url: str, params: dict[str, str]) -> bool:
     """Validate Twilio X-Twilio-Signature without depending on the Twilio SDK."""
-    token = get_settings().twilio_auth_token
+    settings = get_settings()
+    token = settings.twilio_auth_token
     if not token:
-        return True
+        return settings.demo_mode
     if not signature:
         return False
 

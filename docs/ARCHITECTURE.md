@@ -104,3 +104,14 @@ It handles:
 - Configure `KIRANA_TWILIO_AUTH_TOKEN` and `KIRANA_PUBLIC_BASE_URL` before exposing Twilio webhooks
 - Set `KIRANA_AUTH_REQUIRED=true` and create an operator before public deployment
 - Keep raw media retention short; document customer consent expectations
+
+
+## Security control plane
+
+The control plane is designed around explicit authority and scoped evidence rather than implicit trust in transport endpoints. Operator identity is represented by a signed JWT claim set containing `sub`, `store_id`, `role`, and `exp`. When authentication is required, the active store is derived from the token instead of request payloads. Owner and manager role checks protect store creation, operator provisioning, amount mutation, and credit adjustment.
+
+Provider ingress is separated from operator ingress. Twilio WhatsApp callbacks use the provider signature when configured and fall back only in demo mode. UPI callbacks can be verified with an HMAC signature over the timestamp and raw request body. Timestamp tolerance limits replay risk.
+
+External media is treated as untrusted input. Before OCR or transcription adapters fetch a URL, the host must resolve to publicly routable addresses and must not be loopback, private, link-local, multicast, reserved, or unspecified. This prevents the media pipeline from becoming an SSRF path into local infrastructure.
+
+Tenant isolation is enforced at the query layer and the persistence layer. Customer uniqueness is `(store_id, phone)`, operator uniqueness is `(store_id, username)`, and payment duplicate detection is `(store_id, provider_ref)`. This preserves operational independence across stores while allowing the same customer phone or provider reference to appear in different store contexts.

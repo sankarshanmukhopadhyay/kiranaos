@@ -5,6 +5,7 @@ from tempfile import NamedTemporaryFile
 import httpx
 
 from app.core.config import get_settings
+from app.services.security import validate_external_media_url
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +18,7 @@ async def transcribe_voice_note(media_url: str, media_type: str | None = None) -
     settings = get_settings()
     if not settings.openai_api_key:
         return None
+    validate_external_media_url(media_url)
 
     suffix = ".ogg"
     if media_type and "mpeg" in media_type:

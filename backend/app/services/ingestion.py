@@ -35,6 +35,7 @@ from app.schemas.domain import (
 from app.services.adapters import extract_items_with_openai
 from app.services.parser import parse_order_text
 from app.services.auth import ensure_default_store
+from app.services.security import validate_external_media_url
 
 logger = logging.getLogger(__name__)
 
@@ -160,6 +161,13 @@ async def ingest_message(db: Session, payload: IngestMessageIn) -> Order:
     text = payload.text
 
     # OCR / transcription adapter — only runs if configured
+    if not text and payload.media_url:
+        try:
+            validate_external_media_url(payload.media_url)
+        except ValueError as exc:
+            logger.warning("Rejected unsafe media URL: %s", exc)
+            payload.media_url = None
+
     if not text and payload.media_url:
         if payload.message_type == MessageType.image:
             try:
