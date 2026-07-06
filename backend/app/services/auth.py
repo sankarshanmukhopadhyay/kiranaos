@@ -3,7 +3,7 @@ import hashlib
 import hmac
 import json
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import Depends, HTTPException
@@ -54,7 +54,7 @@ def verify_password(password: str, stored: str) -> bool:
 def create_access_token(operator: Operator) -> str:
     settings = get_settings()
     header = {"alg": "HS256", "typ": "JWT"}
-    exp = datetime.now(timezone.utc) + timedelta(minutes=settings.jwt_expiry_minutes)
+    exp = datetime.now(UTC) + timedelta(minutes=settings.jwt_expiry_minutes)
     payload = {
         "sub": str(operator.id),
         "store_id": operator.store_id,
@@ -83,7 +83,7 @@ def decode_access_token(token: str) -> dict[str, Any]:
     if not hmac.compare_digest(_b64(expected), signature_b64):
         raise HTTPException(status_code=401, detail="Invalid token signature")
 
-    if int(payload.get("exp", 0)) < int(datetime.now(timezone.utc).timestamp()):
+    if int(payload.get("exp", 0)) < int(datetime.now(UTC).timestamp()):
         raise HTTPException(status_code=401, detail="Token expired")
     if not payload.get("sub") or not payload.get("store_id") or not payload.get("role"):
         raise HTTPException(status_code=401, detail="Invalid token claims")

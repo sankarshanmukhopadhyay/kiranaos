@@ -7,10 +7,7 @@ import socket
 from time import time
 from urllib.parse import urlparse
 
-from fastapi import HTTPException
-
 from app.core.config import get_settings
-
 
 DEFAULT_SECRET_MARKERS = {"", "change-me", "change-me-before-deploy", "secret", "password"}
 

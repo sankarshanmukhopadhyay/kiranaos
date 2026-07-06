@@ -14,7 +14,6 @@ Design principles (carried from uploaded app, extended here):
 import re
 from dataclasses import dataclass
 
-
 # ── Unit normalisation ────────────────────────────────────────────────────────
 
 UNIT_ALIASES: dict[str, str] = {

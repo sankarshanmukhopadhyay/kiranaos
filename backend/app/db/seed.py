@@ -6,12 +6,11 @@ The seed is idempotent: re-running it skips customers that already exist.
 """
 
 import asyncio
-from datetime import datetime, timedelta, timezone
 
 from app.db.session import Base, SessionLocal, engine
+from app.models.domain import MessageType
 from app.schemas.domain import CreditAdjustIn, IngestMessageIn
 from app.services.ingestion import adjust_credit, ingest_message
-
 
 SAMPLE_ORDERS = [
     IngestMessageIn(
@@ -22,14 +21,14 @@ SAMPLE_ORDERS = [
     IngestMessageIn(
         phone="+919800222222", customer_name="Krishnamurthy",
         building="Bldg B, Flat 101", language="te",
-        message_type="voice",
+        message_type=MessageType.voice,
         media_url="https://example.invalid/voice1.ogg",
         text="rice 5kg, curd 500g, tomatoes 1kg",   # pre-transcribed for demo
     ),
     IngestMessageIn(
         phone="+919800333333", customer_name="Meera Patel",
         building="Bldg C, Flat 204", language="hi",
-        message_type="image",
+        message_type=MessageType.image,
         media_url="https://example.invalid/list1.jpg",
         text="rice 10kg, toor dal 2kg, tel 5L, masala",
     ),
@@ -84,6 +83,7 @@ async def run():
     db = SessionLocal()
     try:
         from sqlalchemy import select
+
         from app.models.domain import Customer
 
         for payload in SAMPLE_ORDERS:

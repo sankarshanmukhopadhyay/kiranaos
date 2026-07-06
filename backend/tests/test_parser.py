@@ -4,6 +4,7 @@ No database, no HTTP — pure function tests.
 """
 
 import pytest
+
 from app.services.parser import ParsedItem, parse_order_text
 
 
