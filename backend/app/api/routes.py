@@ -21,6 +21,7 @@ from app.db.session import get_db
 from app.models.domain import MessageType, Operator, OperatorRole, OrderStatus, Store
 from app.schemas.domain import (
     AmountUpdateIn,
+    AuditEventOut,
     CreditAdjustIn,
     CustomerCreateIn,
     CustomerOut,
@@ -42,6 +43,8 @@ from app.schemas.domain import (
     OutboundMessageOut,
     PaymentOut,
     RouteStop,
+    RouteOptimizeIn,
+    RouteOptimizeOut,
     StatusUpdateIn,
     StoreCreateIn,
     StoreOut,
@@ -49,6 +52,7 @@ from app.schemas.domain import (
     TokenOut,
     UpiWebhookIn,
 )
+from app.services.audit import list_audit_events
 from app.services.auth import (
     authenticate_operator,
     create_access_token,
@@ -83,6 +87,7 @@ from app.services.operations import (
     create_delivery_agent,
     create_outbound_confirmation,
     list_delivery_agents,
+    optimize_route,
     reconcile_upi_payment,
     route_for_agent,
     update_delivery_status,
@@ -93,6 +98,7 @@ DbDep = Annotated[Session, Depends(get_db)]
 StoreDep = Annotated[int, Depends(current_store_id)]
 OwnerDep = Annotated[object, Depends(require_roles(OperatorRole.owner))]
 ManagerDep = Annotated[object, Depends(require_roles(OperatorRole.owner, OperatorRole.manager))]
+StaffDep = Annotated[object, Depends(require_roles(OperatorRole.owner, OperatorRole.manager, OperatorRole.staff))]
 
 
 # ── Health ─────────────────────────────────────────────────────────────────────
@@ -258,7 +264,7 @@ def order_detail(order_id: int, db: DbDep, store_id: StoreDep):
 
 
 @router.patch("/orders/{order_id}/status", response_model=OrderOut)
-def set_order_status(order_id: int, payload: StatusUpdateIn, db: DbDep, store_id: StoreDep, _operator: ManagerDep):
+def set_order_status(order_id: int, payload: StatusUpdateIn, db: DbDep, store_id: StoreDep, _operator: StaffDep):
     try:
         return update_order_status(db, order_id, payload.status, store_id=store_id)
     except ValueError as exc:
@@ -279,6 +285,7 @@ def send_order_confirmation(
     payload: OutboundConfirmationIn,
     db: DbDep,
     store_id: StoreDep,
+    _operator: StaffDep,
 ):
     try:
         order = get_order(db, order_id, store_id=store_id)
@@ -304,7 +311,7 @@ def customers(
 
 
 @router.post("/customers", response_model=CustomerOut, status_code=201)
-def add_customer(payload: CustomerCreateIn, db: DbDep, store_id: StoreDep):
+def add_customer(payload: CustomerCreateIn, db: DbDep, store_id: StoreDep, _operator: StaffDep):
     try:
         c = create_customer(db, payload, store_id=store_id)
         out = CustomerOut.model_validate(c)
@@ -369,7 +376,7 @@ def analytics_input_methods(db: DbDep, store_id: StoreDep, days: int = Query(def
 # ── Delivery ─────────────────────────────────────────────────────────────────
 
 @router.post("/delivery/agents", response_model=DeliveryAgentOut, status_code=201)
-def add_delivery_agent(payload: DeliveryAgentCreateIn, db: DbDep, store_id: StoreDep):
+def add_delivery_agent(payload: DeliveryAgentCreateIn, db: DbDep, store_id: StoreDep, _operator: ManagerDep):
     return create_delivery_agent(db, store_id, payload)
 
 
@@ -384,6 +391,7 @@ def assign_order_delivery(
     payload: DeliveryAssignmentIn,
     db: DbDep,
     store_id: StoreDep,
+    _operator: ManagerDep,
 ):
     try:
         return assign_delivery(db, store_id, order_id, payload)
@@ -397,6 +405,7 @@ def set_delivery_status(
     payload: DeliveryAssignmentStatusIn,
     db: DbDep,
     store_id: StoreDep,
+    _operator: StaffDep,
 ):
     try:
         return update_delivery_status(db, store_id, assignment_id, payload.status)
@@ -407,6 +416,18 @@ def set_delivery_status(
 @router.get("/delivery/agents/{agent_id}/route", response_model=list[RouteStop])
 def delivery_route(agent_id: int, db: DbDep, store_id: StoreDep):
     return route_for_agent(db, store_id, agent_id)
+
+
+@router.post("/delivery/routes/optimize", response_model=RouteOptimizeOut)
+def optimize_delivery_route(payload: RouteOptimizeIn, db: DbDep, store_id: StoreDep, _operator: ManagerDep):
+    return optimize_route(
+        db,
+        store_id,
+        agent_id=payload.agent_id,
+        order_ids=payload.order_ids,
+        start_latitude=payload.start_latitude,
+        start_longitude=payload.start_longitude,
+    )
 
 
 # ── Payments ─────────────────────────────────────────────────────────────────
@@ -427,3 +448,23 @@ async def upi_webhook(
         return reconcile_upi_payment(db, store_id, payload)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+# ── Audit ───────────────────────────────────────────────────────────────────
+
+@router.get("/audit/events", response_model=list[AuditEventOut])
+def audit_events(
+    db: DbDep,
+    store_id: StoreDep,
+    _operator: ManagerDep,
+    entity_type: str | None = Query(default=None),
+    entity_id: str | None = Query(default=None),
+    limit: int = Query(default=100, le=500),
+):
+    return list_audit_events(
+        db,
+        store_id=store_id,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        limit=limit,
+    )

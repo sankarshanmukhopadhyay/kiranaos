@@ -6,7 +6,7 @@ dev:           ## Start the full stack (API + frontend) via Docker Compose
 	docker compose up --build
 
 dev-api:       ## Start the API only (no Docker required)
-	cd backend && pip install -e ".[dev]" -q && \
+	cd backend && pip install --no-build-isolation -e ".[dev]" -q && \
 	mkdir -p data && uvicorn app.main:app --reload --port 8000
 
 dev-frontend:  ## Start the frontend only
@@ -26,7 +26,7 @@ migration:     ## Create an Alembic migration, e.g. make migration msg="add tabl
 # ── Testing ───────────────────────────────────────────────────────────────────
 
 test:          ## Run all backend tests
-	cd backend && pip install -e ".[dev]" -q && pytest -v
+	cd backend && pip install --no-build-isolation -e ".[dev]" -q && pytest -v
 
 test-watch:    ## Run tests in watch mode
 	cd backend && pytest -v --tb=short -x
@@ -45,11 +45,11 @@ typecheck:     ## Type-check backend with mypy
 # ── Installation ──────────────────────────────────────────────────────────────
 
 install:       ## Install all dependencies
-	cd backend && pip install -e ".[dev]"
+	cd backend && pip install --no-build-isolation -e ".[dev]"
 	cd frontend && npm install
 
 install-ocr:   ## Install Google Vision OCR dependency
-	cd backend && pip install -e ".[ocr]"
+	cd backend && pip install --no-build-isolation -e ".[ocr]"
 
 # ── Cleanup ───────────────────────────────────────────────────────────────────
 

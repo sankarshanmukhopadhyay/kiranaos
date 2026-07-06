@@ -93,11 +93,15 @@ export interface Token {
 
 export interface OutboundMessage {
   id: number;
+  store_id: number;
   order_id: number | null;
   customer_id: number;
   destination_phone: string;
   body: string;
   provider: string;
+  provider_message_id: string | null;
+  failure_reason: string | null;
+  dispatch_attempts: number;
   status: "queued" | "sent" | "simulated" | "failed";
   created_at: string;
   sent_at: string | null;
@@ -128,8 +132,19 @@ export interface RouteStop {
   customer_name: string;
   phone: string;
   building: string | null;
+  address: string | null;
+  latitude: number | null;
+  longitude: number | null;
   route_order: number;
   status: DeliveryStatus;
+}
+
+export interface RouteOptimizeResult {
+  store_id: number;
+  agent_id: number | null;
+  ordered_order_ids: number[];
+  stops: RouteStop[];
+  strategy: string;
 }
 
 export interface Payment {
@@ -212,6 +227,13 @@ export const api = {
     }),
   deliveryRoute: (agent_id: number) =>
     req<RouteStop[]>(`/api/delivery/agents/${agent_id}/route`),
+  optimizeRoute: (data: {
+    agent_id?: number; order_ids?: number[];
+    start_latitude?: number; start_longitude?: number;
+  }) => req<RouteOptimizeResult>("/api/delivery/routes/optimize", {
+    method: "POST",
+    body: JSON.stringify(data),
+  }),
 
   // Payments
   reconcileUpi: (data: {

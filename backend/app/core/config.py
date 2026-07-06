@@ -13,6 +13,10 @@ class Settings(BaseSettings):
     twilio_auth_token:      str | None = None
     twilio_account_sid:     str | None = None
     twilio_whatsapp_from:   str | None = None
+    whatsapp_provider:      str = "simulation"
+    meta_whatsapp_token:    str | None = None
+    meta_phone_number_id:   str | None = None
+    provider_timeout_seconds: int = 20
     upi_webhook_secret:     str | None = None
     webhook_timestamp_tolerance_seconds: int = 300
     demo_mode:              bool = True

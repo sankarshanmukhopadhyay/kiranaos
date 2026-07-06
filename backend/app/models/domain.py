@@ -73,6 +73,17 @@ class PaymentStatus(StrEnum):
     failed     = "failed"
 
 
+class AuditAction(StrEnum):
+    order_status_updated = "order_status_updated"
+    order_amount_updated = "order_amount_updated"
+    credit_adjusted = "credit_adjusted"
+    outbound_confirmation_created = "outbound_confirmation_created"
+    delivery_assigned = "delivery_assigned"
+    delivery_status_updated = "delivery_status_updated"
+    route_optimized = "route_optimized"
+    payment_reconciled = "payment_reconciled"
+
+
 # ── Store / tenancy ───────────────────────────────────────────────────────────
 
 class Store(Base):
@@ -114,6 +125,9 @@ class Customer(Base):
     name:            Mapped[str]            = mapped_column(String(120), default="Unknown customer")
     phone:           Mapped[str]            = mapped_column(String(32), index=True)
     building:        Mapped[str | None]     = mapped_column(String(120), nullable=True)
+    address:         Mapped[str | None]     = mapped_column(Text, nullable=True)
+    latitude:        Mapped[float | None]   = mapped_column(Float, nullable=True)
+    longitude:       Mapped[float | None]   = mapped_column(Float, nullable=True)
     language_hint:   Mapped[str | None]     = mapped_column(String(40), nullable=True)
     credit_balance:  Mapped[float]          = mapped_column(Float, default=0.0)
     last_order_at:   Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -231,6 +245,8 @@ class OutboundMessage(Base):
     body:                Mapped[str]            = mapped_column(Text)
     provider:            Mapped[str]            = mapped_column(String(40), default="simulation")
     provider_message_id: Mapped[str | None]     = mapped_column(String(140), nullable=True)
+    failure_reason:      Mapped[str | None]     = mapped_column(Text, nullable=True)
+    dispatch_attempts:   Mapped[int]            = mapped_column(Integer, default=0)
     status:              Mapped[OutboundStatus] = mapped_column(Enum(OutboundStatus), default=OutboundStatus.queued)
     created_at:          Mapped[datetime]       = mapped_column(DateTime(timezone=True), default=utcnow)
     sent_at:             Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -290,3 +306,17 @@ class Payment(Base):
 
     customer: Mapped[Customer | None] = relationship()
     order: Mapped[Order | None] = relationship(back_populates="payments")
+
+
+class AuditEvent(Base):
+    __tablename__ = "audit_events"
+
+    id:          Mapped[int]         = mapped_column(Integer, primary_key=True)
+    store_id:    Mapped[int]         = mapped_column(ForeignKey("stores.id"), default=1, index=True)
+    actor_type:  Mapped[str]         = mapped_column(String(40), default="system")
+    actor_id:    Mapped[str | None]  = mapped_column(String(120), nullable=True)
+    action:      Mapped[AuditAction] = mapped_column(Enum(AuditAction), index=True)
+    entity_type: Mapped[str]         = mapped_column(String(80), index=True)
+    entity_id:   Mapped[str]         = mapped_column(String(120), index=True)
+    evidence:    Mapped[str | None]  = mapped_column(Text, nullable=True)
+    created_at:  Mapped[datetime]    = mapped_column(DateTime(timezone=True), default=utcnow)

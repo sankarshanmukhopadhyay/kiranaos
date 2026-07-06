@@ -177,6 +177,8 @@ def test_outbound_confirmation_is_recorded():
     body = res.json()
     assert body["order_id"] == order_id
     assert body["status"] == "simulated"
+    assert body["provider"] == "simulation"
+    assert body["dispatch_attempts"] == 1
     assert body["destination_phone"] == "+919999990008"
 
 
@@ -295,6 +297,29 @@ def test_delivery_assignment_and_route():
     assert route.json()[0]["order_id"] == order_id
 
 
+def test_route_optimization_updates_route_order_and_records_strategy():
+    agent = client.post("/api/delivery/agents", json={"name": "Route Agent", "phone": "+919999991112"})
+    agent_id = agent.json()["id"]
+    orders = []
+    for idx, building in enumerate(["C-301", "A-101", "B-201"], start=1):
+        order_res = client.post("/api/ingest/messages", json={
+            "phone": f"+91999999006{idx}",
+            "customer_name": f"Route Customer {idx}",
+            "building": building,
+            "text": "milk",
+        })
+        order_id = order_res.json()["id"]
+        orders.append(order_id)
+        client.post(f"/api/orders/{order_id}/delivery", json={"agent_id": agent_id, "route_order": idx})
+
+    optimized = client.post("/api/delivery/routes/optimize", json={"agent_id": agent_id})
+    assert optimized.status_code == 200
+    body = optimized.json()
+    assert body["strategy"] == "address_sort_fallback"
+    assert sorted(body["ordered_order_ids"]) == sorted(orders)
+    assert [stop["route_order"] for stop in body["stops"]] == [1, 2, 3]
+
+
 def test_payment_cannot_exceed_balance():
     client.post("/api/ingest/messages", json={"phone": "+919999990021", "text": "tea"})
     customers = client.get("/api/customers").json()
@@ -381,3 +406,18 @@ def test_upi_duplicate_is_scoped_to_current_store():
         assert len(db.query(Payment).filter(Payment.provider_ref == "same-ref").all()) == 2
     finally:
         db.close()
+
+
+def test_audit_events_are_created_for_order_mutations():
+    create_res = client.post("/api/ingest/messages", json={
+        "phone": "+919999990070",
+        "customer_name": "Audit Test",
+        "text": "sugar",
+    })
+    order_id = create_res.json()["id"]
+    client.patch(f"/api/orders/{order_id}/status", json={"status": "packed"})
+
+    events = client.get(f"/api/audit/events?entity_type=order&entity_id={order_id}")
+    assert events.status_code == 200
+    actions = [event["action"] for event in events.json()]
+    assert "order_status_updated" in actions

@@ -70,7 +70,7 @@ kiranaos/
 │   ├── vite.config.ts
 │   └── vercel.json
 │
-├── docs/ARCHITECTURE.md           # Data model decisions, pipeline design
+├── docs/                         # Architecture, adoption, API, deployment, security, release notes
 ├── .github/workflows/
 │   ├── ci.yml                     # Test + lint + type-check on every push
 │   └── deploy.yml                 # Deploy to Railway + Vercel on main
@@ -139,11 +139,17 @@ All endpoints are prefixed `/api`. Auto-generated docs at `/docs` (Swagger) and 
 | `POST` | `/orders/{id}/delivery` | Assign an order to an agent with route order |
 | `PATCH` | `/delivery/assignments/{id}/status` | Update assignment lifecycle |
 | `GET` | `/delivery/agents/{id}/route` | Route-ordered delivery stop list |
+| `POST` | `/delivery/routes/optimize` | Optimize route ordering for assigned stops |
 
 ### Payments
 | Method | Path | Description |
 |---|---|---|
 | `POST` | `/payments/upi/webhook` | Reconcile UPI payment events to customer credit/order state |
+
+### Audit
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/audit/events` | Store-scoped audit events for sensitive operational mutations |
 
 ---
 
@@ -160,10 +166,15 @@ All settings use the `KIRANA_` prefix. Copy `backend/.env.example` to `backend/.
 | `KIRANA_TWILIO_AUTH_TOKEN` | — | Twilio auth token; when set, webhook signatures are enforced |
 | `KIRANA_TWILIO_ACCOUNT_SID` | — | Twilio account SID for outbound WhatsApp |
 | `KIRANA_TWILIO_WHATSAPP_FROM` | — | Twilio WhatsApp sender number |
+| `KIRANA_WHATSAPP_PROVIDER` | `simulation` | Outbound provider: `simulation`, `twilio`, or `meta` |
+| `KIRANA_META_WHATSAPP_TOKEN` | — | Meta Cloud API token for outbound WhatsApp |
+| `KIRANA_META_PHONE_NUMBER_ID` | — | Meta phone number id for outbound WhatsApp |
+| `KIRANA_PROVIDER_TIMEOUT_SECONDS` | `20` | Outbound provider HTTP timeout |
 | `KIRANA_FRONTEND_ORIGIN` | `*` | CORS origin; set to your frontend domain in production |
 | `KIRANA_AUTH_REQUIRED` | `false` | Require bearer JWTs for store-scoped API routes |
 | `KIRANA_JWT_SECRET` | `change-me` | HS256 JWT signing secret |
 | `KIRANA_JWT_EXPIRY_MINUTES` | `480` | Operator session lifetime |
+| `KIRANA_UPI_WEBHOOK_SECRET` | — | Shared secret for signed UPI webhook callbacks |
 | `KIRANA_GOOGLE_VISION_KEY_JSON` | — | GCP service account JSON (for OCR) |
 | `KIRANA_OPENAI_API_KEY` | — | Optional parser enhancement and voice note transcription |
 | `KIRANA_OPENAI_TRANSCRIPTION_MODEL` | `whisper-1` | Audio transcription model used for voice notes |
@@ -175,13 +186,17 @@ All settings use the `KIRANA_` prefix. Copy `backend/.env.example` to `backend/.
 
 ### WhatsApp (Twilio or Meta Cloud API)
 
-Twilio has a concrete endpoint at `/api/webhooks/twilio/whatsapp`. It validates
+Twilio has a concrete inbound endpoint at `/api/webhooks/twilio/whatsapp`. It validates
 `X-Twilio-Signature` when `KIRANA_TWILIO_AUTH_TOKEN` is configured, maps Twilio's form payload to
 `IngestMessageIn`, and returns empty TwiML immediately after ingestion.
 
 The generic `/api/webhooks/whatsapp` POST route is retained as a provider-neutral entry point for
 future Meta Cloud API payload mapping. The `IngestMessageIn` schema is the normalised shape that
 `ingest_message()` expects.
+
+Outbound order confirmations use `KIRANA_WHATSAPP_PROVIDER`. `simulation` records a local evidence
+event without sending a provider message. `twilio` and `meta` dispatch through their provider APIs
+and preserve provider message ids, dispatch attempts, status, and failure reasons.
 
 **Twilio sandbox** (fastest to start):
 1. Create a Twilio account and enable the WhatsApp Sandbox.
@@ -241,6 +256,18 @@ make migrate
 ---
 
 
+### v2.2.0 maturity release
+
+The v2.2.0 maturity release completes the adoption roadmap:
+
+- provider-aware outbound WhatsApp confirmations for simulation, Twilio, and Meta;
+- deterministic delivery route optimization with geocoded nearest-neighbour routing and address-sort fallback;
+- consistent role-based authority across owner, manager, and staff workflows;
+- audit events for order, credit, outbound, delivery, route, and payment mutations;
+- production environment template, CI workflows, release archive workflow, changelog, and expanded documentation.
+
+See [`docs/RELEASE_NOTES_v2.2.0.md`](docs/RELEASE_NOTES_v2.2.0.md) for full release notes.
+
 ### Security hardening
 
 The v2.1.1 hardening release closes the main red-team findings from the operational roadmap release:
@@ -265,12 +292,19 @@ See [`SECURITY.md`](SECURITY.md) for the production checklist and trust-boundary
 - [x] Alembic migration baseline for production schema management
 - [x] Multi-store / franchise support with `store_id` on operational models and store-scoped service queries
 - [x] Operator authentication with HS256 JWTs and optional production enforcement
+- [x] Provider-specific outbound WhatsApp dispatch for Twilio and Meta Cloud API
+- [x] Route optimization using geocoded customer coordinates with deterministic fallback
+- [x] Role-based permissions beyond store-level JWT scope
 
-### Next release candidates
+### Documentation
 
-- [ ] Provider-specific outbound WhatsApp dispatch for Twilio and Meta Cloud API
-- [ ] Map-based route optimisation using geocoded addresses
-- [ ] Role-based permissions beyond store-level JWT scope
+- [`docs/ADOPTION_GUIDE.md`](docs/ADOPTION_GUIDE.md)
+- [`docs/API_GUIDE.md`](docs/API_GUIDE.md)
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+- [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)
+- [`docs/OPERATIONS.md`](docs/OPERATIONS.md)
+- [`docs/SECURITY_MODEL.md`](docs/SECURITY_MODEL.md)
+- [`docs/TESTING.md`](docs/TESTING.md)
 
 ---
 

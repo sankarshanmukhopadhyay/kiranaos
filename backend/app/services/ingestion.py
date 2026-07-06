@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.core.config import get_settings
 from app.models.domain import (
+    AuditAction,
     Customer,
     InboundMessage,
     LedgerEntry,
@@ -26,6 +27,7 @@ from app.models.domain import (
     OrderStatus,
     ParseStatus,
 )
+from app.services.audit import record_audit_event
 from app.schemas.domain import (
     AmountUpdateIn,
     CreditAdjustIn,
@@ -107,6 +109,9 @@ def create_customer(db: Session, data: CustomerCreateIn, store_id: int | None = 
         name=data.name,
         phone=data.phone,
         building=data.building,
+        address=data.address,
+        latitude=data.latitude,
+        longitude=data.longitude,
         language_hint=data.language_hint,
     )
     db.add(customer)
@@ -290,17 +295,35 @@ def list_orders(
 
 def update_order_status(db: Session, order_id: int, status: OrderStatus, store_id: int | None = None) -> Order:
     order = _load_order(db, order_id, store_id=store_id)
+    previous = order.status
     order.status = status
     if status == OrderStatus.delivered:
         order.delivered_at = datetime.now(timezone.utc)
+    record_audit_event(
+        db,
+        store_id=order.store_id,
+        action=AuditAction.order_status_updated,
+        entity_type="order",
+        entity_id=order.id,
+        evidence={"from": str(previous), "to": str(status)},
+    )
     db.commit()
     return _load_order(db, order_id, store_id=store_id)
 
 
 def update_order_amount(db: Session, order_id: int, data: AmountUpdateIn, store_id: int | None = None) -> Order:
     order = _load_order(db, order_id, store_id=store_id)
+    previous = {"amount_due": order.amount_due, "is_credit": bool(order.is_credit)}
     order.amount_due = data.amount_due
     order.is_credit  = data.is_credit
+    record_audit_event(
+        db,
+        store_id=order.store_id,
+        action=AuditAction.order_amount_updated,
+        entity_type="order",
+        entity_id=order.id,
+        evidence={"from": previous, "to": data.model_dump()},
+    )
     db.commit()
     return _load_order(db, order_id, store_id=store_id)
 
@@ -327,6 +350,14 @@ def adjust_credit(db: Session, customer_id: int, data: CreditAdjustIn, store_id:
         amount=actual,
         reason=data.reason,
     ))
+    record_audit_event(
+        db,
+        store_id=customer.store_id,
+        action=AuditAction.credit_adjusted,
+        entity_type="customer",
+        entity_id=customer.id,
+        evidence={"amount": actual, "reason": data.reason, "balance": customer.credit_balance},
+    )
     db.commit()
     db.refresh(customer)
     logger.info(

@@ -26,7 +26,7 @@ def create_app() -> FastAPI:
 
     app = FastAPI(
         title="KiranaOS API",
-        version="2.1.1",
+        version="2.2.0",
         description=(
             "WhatsApp-native order management for kirana stores. "
             "Converts inbound messages into structured orders. "

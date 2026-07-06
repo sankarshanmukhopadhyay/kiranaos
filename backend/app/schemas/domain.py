@@ -8,6 +8,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field, field_validator
 
 from app.models.domain import (
+    AuditAction,
     DeliveryStatus,
     MessageType,
     OperatorRole,
@@ -34,6 +35,9 @@ class CustomerOut(BaseModel):
     name:            str
     phone:           str
     building:        str | None
+    address:         str | None = None
+    latitude:        float | None = None
+    longitude:       float | None = None
     language_hint:   str | None
     credit_balance:  float
     last_order_at:   datetime | None
@@ -149,6 +153,9 @@ class CustomerCreateIn(BaseModel):
     phone:         str         = Field(..., examples=["+919999999999"])
     store_id:      int | None  = None
     building:      str | None  = None
+    address:       str | None  = None
+    latitude:      float | None = Field(default=None, ge=-90, le=90)
+    longitude:     float | None = Field(default=None, ge=-180, le=180)
     language_hint: str | None  = None
 
     @field_validator("phone")
@@ -199,6 +206,8 @@ class OutboundMessageOut(BaseModel):
     body:                str
     provider:            str
     provider_message_id: str | None
+    failure_reason:      str | None = None
+    dispatch_attempts:   int
     status:              OutboundStatus
     created_at:          datetime
     sent_at:             datetime | None
@@ -257,8 +266,26 @@ class RouteStop(BaseModel):
     customer_name: str
     phone: str
     building: str | None
+    address: str | None = None
+    latitude: float | None = None
+    longitude: float | None = None
     route_order: int
     status: DeliveryStatus
+
+
+class RouteOptimizeIn(BaseModel):
+    agent_id: int | None = None
+    order_ids: list[int] | None = None
+    start_latitude: float | None = Field(default=None, ge=-90, le=90)
+    start_longitude: float | None = Field(default=None, ge=-180, le=180)
+
+
+class RouteOptimizeOut(BaseModel):
+    store_id: int
+    agent_id: int | None
+    ordered_order_ids: list[int]
+    stops: list[RouteStop]
+    strategy: str
 
 
 class UpiWebhookIn(BaseModel):
@@ -303,3 +330,17 @@ class TopItem(BaseModel):
 class InputMethodStat(BaseModel):
     message_type: str
     count:        int
+
+
+class AuditEventOut(BaseModel):
+    id: int
+    store_id: int
+    actor_type: str
+    actor_id: str | None
+    action: AuditAction
+    entity_type: str
+    entity_id: str
+    evidence: str | None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}

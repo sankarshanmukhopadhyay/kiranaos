@@ -1,10 +1,12 @@
 import json
+import math
 from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.models.domain import (
+    AuditAction,
     Customer,
     DeliveryAgent,
     DeliveryAssignment,
@@ -23,6 +25,9 @@ from app.schemas.domain import (
     OutboundConfirmationIn,
     UpiWebhookIn,
 )
+from app.core.config import get_settings
+from app.services.adapters import send_meta_whatsapp, send_twilio_whatsapp
+from app.services.audit import record_audit_event
 
 
 def create_outbound_confirmation(
@@ -42,7 +47,36 @@ def create_outbound_confirmation(
         status=OutboundStatus.simulated,
         sent_at=datetime.now(timezone.utc),
     )
+    settings = get_settings()
+    provider = settings.whatsapp_provider.lower()
+    outbound.provider = provider
+    outbound.dispatch_attempts = 1
+    if provider == "simulation":
+        outbound.status = OutboundStatus.simulated
+        outbound.sent_at = datetime.now(timezone.utc)
+    else:
+        try:
+            if provider == "twilio":
+                outbound.provider_message_id = send_twilio_whatsapp(customer.phone, body)
+            elif provider == "meta":
+                outbound.provider_message_id = send_meta_whatsapp(customer.phone, body)
+            else:
+                raise RuntimeError(f"Unsupported WhatsApp provider: {provider}")
+            outbound.status = OutboundStatus.sent
+            outbound.sent_at = datetime.now(timezone.utc)
+        except Exception as exc:
+            outbound.status = OutboundStatus.failed
+            outbound.failure_reason = str(exc)
     db.add(outbound)
+    db.flush()
+    record_audit_event(
+        db,
+        store_id=order.store_id,
+        action=AuditAction.outbound_confirmation_created,
+        entity_type="outbound_message",
+        entity_id=outbound.id,
+        evidence={"order_id": order.id, "provider": outbound.provider, "status": str(outbound.status)},
+    )
     db.commit()
     db.refresh(outbound)
     return outbound
@@ -107,6 +141,14 @@ def assign_delivery(
             notes=payload.notes,
         )
         db.add(assignment)
+    record_audit_event(
+        db,
+        store_id=store_id,
+        action=AuditAction.delivery_assigned,
+        entity_type="order",
+        entity_id=order_id,
+        evidence={"agent_id": payload.agent_id, "route_order": payload.route_order},
+    )
     db.commit()
     db.refresh(assignment)
     return assignment
@@ -132,6 +174,14 @@ def update_delivery_status(
         if order:
             order.status = OrderStatus.delivered
             order.delivered_at = datetime.now(timezone.utc)
+    record_audit_event(
+        db,
+        store_id=store_id,
+        action=AuditAction.delivery_status_updated,
+        entity_type="delivery_assignment",
+        entity_id=assignment.id,
+        evidence={"status": str(status), "order_id": assignment.order_id},
+    )
     db.commit()
     db.refresh(assignment)
     return assignment
@@ -157,11 +207,108 @@ def route_for_agent(db: Session, store_id: int, agent_id: int) -> list[dict]:
             "customer_name": row.order.customer.name,
             "phone": row.order.customer.phone,
             "building": row.order.customer.building,
+            "address": row.order.customer.address,
+            "latitude": row.order.customer.latitude,
+            "longitude": row.order.customer.longitude,
             "route_order": row.route_order,
             "status": row.status,
         }
         for row in rows
     ]
+
+
+def _distance(a_lat: float, a_lon: float, b_lat: float, b_lon: float) -> float:
+    return math.hypot(a_lat - b_lat, a_lon - b_lon)
+
+
+def optimize_route(
+    db: Session,
+    store_id: int,
+    *,
+    agent_id: int | None = None,
+    order_ids: list[int] | None = None,
+    start_latitude: float | None = None,
+    start_longitude: float | None = None,
+) -> dict:
+    stmt = (
+        select(DeliveryAssignment)
+        .where(DeliveryAssignment.store_id == store_id)
+        .options(selectinload(DeliveryAssignment.order).selectinload(Order.customer))
+    )
+    if agent_id is not None:
+        stmt = stmt.where(DeliveryAssignment.agent_id == agent_id)
+    if order_ids:
+        stmt = stmt.where(DeliveryAssignment.order_id.in_(order_ids))
+    assignments = list(db.scalars(stmt).all())
+
+    geocoded = [
+        row for row in assignments
+        if row.order.customer.latitude is not None and row.order.customer.longitude is not None
+    ]
+    if geocoded and len(geocoded) == len(assignments):
+        current_lat = start_latitude if start_latitude is not None else geocoded[0].order.customer.latitude
+        current_lon = start_longitude if start_longitude is not None else geocoded[0].order.customer.longitude
+        remaining = geocoded[:]
+        ordered: list[DeliveryAssignment] = []
+        while remaining:
+            next_stop = min(
+                remaining,
+                key=lambda row: _distance(
+                    current_lat,
+                    current_lon,
+                    row.order.customer.latitude or current_lat,
+                    row.order.customer.longitude or current_lon,
+                ),
+            )
+            ordered.append(next_stop)
+            remaining.remove(next_stop)
+            current_lat = next_stop.order.customer.latitude or current_lat
+            current_lon = next_stop.order.customer.longitude or current_lon
+        strategy = "nearest_neighbor_geocoded"
+    else:
+        ordered = sorted(
+            assignments,
+            key=lambda row: (
+                row.order.customer.building or "",
+                row.order.customer.address or "",
+                row.order.customer.name,
+                row.order_id,
+            ),
+        )
+        strategy = "address_sort_fallback"
+
+    stops = []
+    for idx, assignment in enumerate(ordered, start=1):
+        assignment.route_order = idx
+        stops.append({
+            "assignment_id": assignment.id,
+            "order_id": assignment.order_id,
+            "customer_name": assignment.order.customer.name,
+            "phone": assignment.order.customer.phone,
+            "building": assignment.order.customer.building,
+            "address": assignment.order.customer.address,
+            "latitude": assignment.order.customer.latitude,
+            "longitude": assignment.order.customer.longitude,
+            "route_order": idx,
+            "status": assignment.status,
+        })
+
+    record_audit_event(
+        db,
+        store_id=store_id,
+        action=AuditAction.route_optimized,
+        entity_type="delivery_route",
+        entity_id=agent_id or "store",
+        evidence={"strategy": strategy, "order_ids": [row.order_id for row in ordered]},
+    )
+    db.commit()
+    return {
+        "store_id": store_id,
+        "agent_id": agent_id,
+        "ordered_order_ids": [row.order_id for row in ordered],
+        "stops": stops,
+        "strategy": strategy,
+    }
 
 
 def reconcile_upi_payment(db: Session, store_id: int, payload: UpiWebhookIn) -> Payment:
@@ -218,6 +365,14 @@ def reconcile_upi_payment(db: Session, store_id: int, payload: UpiWebhookIn) -> 
     if order and payload.amount >= order.amount_due:
         order.is_credit = False
 
+    record_audit_event(
+        db,
+        store_id=store_id,
+        action=AuditAction.payment_reconciled,
+        entity_type="payment",
+        entity_id=payload.provider_ref,
+        evidence={"amount": payload.amount, "customer_id": customer_id, "order_id": payload.order_id},
+    )
     db.commit()
     db.refresh(payment)
     return payment

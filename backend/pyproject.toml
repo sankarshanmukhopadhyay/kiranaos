@@ -1,6 +1,10 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "kiranaos-api"
-version = "2.1.1"
+version = "2.2.0"
 description = "WhatsApp-native order management for kirana stores"
 requires-python = ">=3.11"
 dependencies = [
@@ -28,6 +32,9 @@ ocr = [
 [tool.pytest.ini_options]
 testpaths    = ["tests"]
 asyncio_mode = "auto"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
 
 [tool.ruff]
 line-length    = 100
