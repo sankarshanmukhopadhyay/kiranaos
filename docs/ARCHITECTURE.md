@@ -20,8 +20,8 @@ WhatsApp customer
 │  webhook route                        │
 │    └─► ingestion.py                  │
 │          ├─ find_or_create_customer   │  ← upsert on phone number
-│          ├─ OCR adapter (optional)    │  ← Google Vision for photos
-│          ├─ voice adapter (optional)  │  ← OpenAI audio transcription
+│          ├─ OCR adapter (optional)    │  ← Google Vision or Sarvam Vision
+│          ├─ voice adapter (optional)  │  ← OpenAI Whisper or Sarvam Saaras
 │          ├─ parser.py                 │  ← text → [ParsedItem]
 │          └─ creates Order + Items     │  ← normalised, queryable
 │                                       │
@@ -61,8 +61,14 @@ IngestMessageIn (normalised payload)
     │
     ├── message_type = text   →  parse_order_text(text)
     ├── message_type = image  →  OCR adapter → parse_order_text(ocr_text)
-    └── message_type = voice  →  OpenAI transcription adapter, if configured
+    └── message_type = voice  →  STT adapter, if configured
                                    → parse_order_text(transcript)
+
+If parse_order_text finds zero items, an optional LLM parser-fallback
+adapter gets a second pass at the same text before falling back to
+needs_review. OCR, STT, and the parser fallback are each independently
+pluggable — see docs/AI_PROVIDERS.md for the full provider matrix
+(default: OpenAI + Google Vision; optional: Sarvam AI end-to-end).
 
 parse_order_text returns [ParsedItem(name, quantity, unit, confidence)]
 
@@ -101,6 +107,7 @@ It handles:
 - Run `make migrate` before serving production traffic
 - Attach Google Vision to the OCR adapter: set `KIRANA_GOOGLE_VISION_KEY_JSON`
 - Configure `KIRANA_OPENAI_API_KEY` to transcribe voice notes and improve long-tail parsing
+- Or configure `KIRANA_SARVAM_API_KEY` plus `KIRANA_STT_PROVIDER` / `KIRANA_OCR_PROVIDER` / `KIRANA_PARSER_AI_PROVIDER` to use Sarvam's Indic-language models instead — see `docs/AI_PROVIDERS.md`
 - Configure `KIRANA_TWILIO_AUTH_TOKEN` and `KIRANA_PUBLIC_BASE_URL` before exposing Twilio webhooks
 - Set `KIRANA_AUTH_REQUIRED=true` and create an operator before public deployment
 - Keep raw media retention short; document customer consent expectations

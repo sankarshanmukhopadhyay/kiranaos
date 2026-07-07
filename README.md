@@ -48,13 +48,20 @@ kiranaos/
 │   │   │   ├── auth.py            # Operator auth, JWT issuance, store scope
 │   │   │   ├── operations.py      # Delivery, outbound confirmation, UPI reconciliation
 │   │   │   ├── parser.py          # Text → [ParsedItem] (pure function, no I/O)
-│   │   │   ├── voice.py           # Voice note transcription adapter
-│   │   │   └── ocr/
-│   │   │       └── google_vision.py  # OCR adapter for handwritten photos
+│   │   │   ├── stt/               # Speech-to-text provider dispatch (see docs/AI_PROVIDERS.md)
+│   │   │   │   ├── openai_whisper.py  # Default STT provider
+│   │   │   │   └── sarvam.py          # Optional: Sarvam Saaras STT
+│   │   │   ├── ocr/               # OCR provider dispatch
+│   │   │   │   ├── google_vision.py   # Default OCR provider
+│   │   │   │   └── sarvam_vision.py   # Optional: Sarvam Vision OCR
+│   │   │   └── llm/               # Parser-fallback LLM provider dispatch
+│   │   │       ├── openai_chat.py     # Default fallback provider
+│   │   │       └── sarvam_chat.py     # Optional: Sarvam Chat (sarvam-30b)
 │   │   └── main.py                # FastAPI app factory
 │   ├── tests/
 │   │   ├── test_parser.py         # Parser unit tests (14 cases, pure function)
-│   │   └── test_api.py            # API integration tests (in-memory SQLite)
+│   │   ├── test_api.py            # API integration tests (in-memory SQLite)
+│   │   └── test_sarvam_adapters.py # Sarvam adapter conformance tests (mocked HTTP)
 │   ├── Dockerfile
 │   ├── alembic/                   # Production migration baseline
 │   ├── alembic.ini
@@ -178,6 +185,12 @@ All settings use the `KIRANA_` prefix. Copy `backend/.env.example` to `backend/.
 | `KIRANA_GOOGLE_VISION_KEY_JSON` | — | GCP service account JSON (for OCR) |
 | `KIRANA_OPENAI_API_KEY` | — | Optional parser enhancement and voice note transcription |
 | `KIRANA_OPENAI_TRANSCRIPTION_MODEL` | `whisper-1` | Audio transcription model used for voice notes |
+| `KIRANA_SARVAM_API_KEY` | — | Sarvam AI key; enables the Sarvam STT/OCR/parser-fallback adapters |
+| `KIRANA_STT_PROVIDER` | `openai` | `openai` \| `sarvam` \| `none` |
+| `KIRANA_OCR_PROVIDER` | `google_vision` | `google_vision` \| `sarvam` \| `none` |
+| `KIRANA_PARSER_AI_PROVIDER` | `openai` | `openai` \| `sarvam` \| `none` |
+| `KIRANA_SARVAM_STT_MODEL` | `saaras:v3` | Sarvam STT model |
+| `KIRANA_SARVAM_LLM_MODEL` | `sarvam-30b` | Sarvam chat model for parser fallback; `sarvam-105b` for higher quality |
 | `KIRANA_LOG_LEVEL` | `INFO` | Python logging level |
 
 ---
@@ -285,7 +298,7 @@ See [`SECURITY.md`](SECURITY.md) for the production checklist and trust-boundary
 
 ## Roadmap
 
-- [x] Voice note transcription through a configurable OpenAI audio adapter, with safe `needs_review` fallback when no key is configured
+- [x] Voice note transcription through a configurable OpenAI or Sarvam Saaras audio adapter, with safe `needs_review` fallback when no key is configured — see `docs/AI_PROVIDERS.md`
 - [x] Outbound WhatsApp confirmation records for order lifecycle events, simulated locally and ready for provider dispatch
 - [x] Delivery assignment, delivery status lifecycle, and route-ordered agent stop lists
 - [x] UPI payment webhook reconciliation against customer credit and order state
