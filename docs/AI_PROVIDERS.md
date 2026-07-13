@@ -7,9 +7,9 @@ so existing deployments see no behaviour change until you opt in.
 
 | Capability | Contract | Default provider | Sarvam alternative | Dispatcher |
 |---|---|---|---|---|
-| Speech-to-text | `transcribe(media_url, media_type) -> str \| None` | OpenAI Whisper (`whisper-1`) | Sarvam Saaras (`saaras:v3`) | `app/services/stt/__init__.py` |
-| Photo/handwriting OCR | `extract_text(media_url) -> str` | Google Cloud Vision | Sarvam Vision (document digitization) | `app/services/ocr/__init__.py` |
-| Parser fallback (low-confidence text) | `extract_items(text) -> list[str] \| None` | OpenAI (`gpt-4o-mini`) | Sarvam Chat (`sarvam-30b`, OpenAI-compatible `/v1/chat/completions`) | `app/services/llm/__init__.py` |
+| Speech-to-text | `transcribe(media_url, media_type) -> str \| None` | OpenAI Whisper (`whisper-1`) | Sarvam Saaras (`saaras:v2`) | `app/services/voice.py` |
+| Photo/handwriting OCR | `extract_text(media_url) -> str` | Google Cloud Vision | Sarvam Vision (document digitization) | `app/services/ingestion.py` provider branch |
+| Parser fallback (unparsed text) | `extract_items(text) -> list[str] \| None` | OpenAI (`gpt-4o-mini`) | Sarvam Chat (`sarvam-m`, OpenAI-compatible `/v1/chat/completions`) | `app/services/adapters.py` |
 
 None of these steps can place an order on their own. Every path — rule-based
 parser, OpenAI, or Sarvam — feeds back into the same `parse_order_text()` /
@@ -41,13 +41,11 @@ KIRANA_STT_PROVIDER=sarvam          # default: openai
 KIRANA_OCR_PROVIDER=sarvam          # default: google_vision
 KIRANA_PARSER_AI_PROVIDER=sarvam    # default: openai
 
-KIRANA_SARVAM_STT_MODEL=saaras:v3        # default
-KIRANA_SARVAM_LLM_MODEL=sarvam-30b       # default; use sarvam-105b for higher-quality fallback parsing
+KIRANA_SARVAM_STT_MODEL=saaras:v2        # default in .env.example
+KIRANA_SARVAM_LLM_MODEL=sarvam-m         # default in .env.example; swap only after testing
 ```
 
-Unknown or unset provider values fall back to "no AI assist" (logged as
-a warning), never to an undefined path — consistent with this repo's
-fail-closed posture elsewhere (`assert_secure_runtime_config`).
+Unknown provider values fail configuration validation at startup. Set a provider to `none` for review-only mode.
 
 ## Recommended rollout (not yet executed — this is guidance, not a claim of production use)
 
@@ -110,9 +108,7 @@ the conformance matrix below.
 | LLM parser fallback | Well-formed prompt + valid JSON content → returns item list | Malformed JSON in response content → returns `None`, does not raise |
 | Provider dispatch | Unset `KIRANA_*_PROVIDER` → defaults to pre-Sarvam provider | Unknown provider string → returns `None`/`""`, logs a warning, never raises |
 
-Every row above has a corresponding passing and failing test in
-`backend/tests/test_sarvam_adapters.py` (10 tests total, all currently
-passing — see validation notes in the commit message).
+Every row above has a corresponding passing and failing test in `backend/tests/test_sarvam_adapters.py`. Release 1 validation passed with 57 backend tests.
 
 ## What is not yet done (explicitly out of scope for this change)
 

@@ -179,3 +179,13 @@
   ::-webkit-scrollbar { width: 5px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: rgba(15,25,35,0.15); border-radius: 10px; }
+
+/* Release 1 pilot-readiness additions */
+.login-box { padding: 10px 20px; display: flex; flex-direction: column; gap: 8px; }
+.login-box input { border: 1px solid rgba(255,255,255,0.16); background: rgba(255,255,255,0.08); color: #fff; border-radius: 6px; padding: 8px; font: inherit; }
+.login-box input::placeholder { color: rgba(255,255,255,0.45); }
+.drawer { position: absolute; top: 0; right: 0; width: min(420px, 92vw); height: 100%; background: #fff; border-left: 1px solid var(--border); box-shadow: var(--shadow-md); padding: 24px; overflow-y: auto; z-index: 10; }
+.drawer h2 { font-family: var(--font-head); margin-bottom: 8px; }
+.drawer h3 { font-family: var(--font-head); font-size: 14px; margin: 20px 0 8px; }
+.drawer-close { position: absolute; top: 12px; right: 16px; border: none; background: var(--paper-dim); width: 28px; height: 28px; border-radius: 50%; font-size: 20px; }
+.drawer-row { padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 12px; line-height: 1.45; color: var(--ink-soft); }

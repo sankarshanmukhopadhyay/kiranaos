@@ -1,8 +1,8 @@
 # KiranaOS
 
-**WhatsApp-native order management for kirana store owners.**
+**WhatsApp-native order capture and pilot-safe merchant operations for kirana store owners.**
 
-Customers keep sending WhatsApp messages exactly as they always have — photos of handwritten lists, voice notes, freeform text in any language. KiranaOS converts those messages into a structured order dashboard. Pending, packing, delivered. Udhaari tracked per customer. Customers silent for two weeks flagged before they switch to Blinkit for good.
+Customers keep sending WhatsApp messages exactly as they always have — photos of handwritten lists, voice notes, freeform text in any language. KiranaOS converts those messages into a structured order dashboard. Pending, packing, delivered. Udhaari tracked per customer. Customers silent for two weeks are flagged, udhaari remains visible, and low-confidence orders can be reviewed before fulfillment.
 
 No app for customers to download. No change in their behaviour.
 
@@ -24,7 +24,7 @@ make dev-frontend   # terminal 2: frontend on :5173
 make seed           # optional: load demo data
 ```
 
-Open **http://localhost:5173**. Click **"Simulate WA Message"** in the sidebar to watch the full ingestion pipeline run.
+Open **http://localhost:5173**. Click **"Simulate WA order"** in the sidebar to watch the Release 1 ingestion and review workflow run.
 
 The interactive API documentation is at **http://localhost:8000/docs**.
 
@@ -60,7 +60,7 @@ kiranaos/
 │   │   └── main.py                # FastAPI app factory
 │   ├── tests/
 │   │   ├── test_parser.py         # Parser unit tests (14 cases, pure function)
-│   │   ├── test_api.py            # API integration tests (in-memory SQLite)
+│   │   │   ├── test_api.py            # API integration tests (SQLite test DB)
 │   │   └── test_sarvam_adapters.py # Sarvam adapter conformance tests (mocked HTTP)
 │   ├── Dockerfile
 │   ├── alembic/                   # Production migration baseline
@@ -70,7 +70,7 @@ kiranaos/
 │
 ├── frontend/
 │   ├── src/
-│   │   ├── App.tsx                # Full dashboard — 4 views, real API calls
+│   │   ├── App.tsx                # Pilot dashboard: orders, review queue, customers, closing
 │   │   ├── lib/api.ts             # Typed API client
 │   │   └── main.tsx
 │   ├── index.html
@@ -79,8 +79,7 @@ kiranaos/
 │
 ├── docs/                         # Architecture, adoption, API, deployment, security, release notes
 ├── .github/workflows/
-│   ├── ci.yml                     # Test + lint + type-check on every push
-│   └── deploy.yml                 # Deploy to Railway + Vercel on main
+│   └── ci.yml                     # Backend lint/tests + frontend build
 ├── docker-compose.yml
 ├── Makefile                       # make dev / test / lint / seed
 └── railway.json
@@ -96,6 +95,7 @@ All endpoints are prefixed `/api`. Auto-generated docs at `/docs` (Swagger) and 
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/dashboard/summary` | Single-call load: pending, packed, delivered today, needs_review, dormant, total credit |
+| `GET` | `/dashboard/daily-closing` | Basic pilot daily closing summary |
 
 ### Stores & Operators
 | Method | Path | Description |
@@ -110,7 +110,9 @@ All endpoints are prefixed `/api`. Auto-generated docs at `/docs` (Swagger) and 
 |---|---|---|
 | `GET` | `/orders` | List orders. Filter: `?status=pending&customer_id=1` |
 | `GET` | `/orders/{id}` | Single order with customer + items |
-| `PATCH` | `/orders/{id}/status` | Advance: pending → packed → delivered |
+| `PATCH` | `/orders/{id}/status` | Guarded lifecycle transitions |
+| `PATCH` | `/orders/{id}/items` | Correct parsed items before fulfillment |
+| `POST` | `/orders/{id}/review/resolve` | Resolve a review order to pending with auditable evidence |
 | `PATCH` | `/orders/{id}/amount` | Set amount and udhaari flag |
 | `POST` | `/orders/{id}/confirmations` | Record/send outbound WhatsApp order confirmation |
 
@@ -269,17 +271,19 @@ make migrate
 ---
 
 
-### v2.2.0 maturity release
+### v2.3.0 Commercial Foundation Release
 
-The v2.2.0 maturity release completes the adoption roadmap:
+The v2.3.0 Release 1 Commercial Foundation release stabilizes KiranaOS for controlled merchant pilots:
 
-- provider-aware outbound WhatsApp confirmations for simulation, Twilio, and Meta;
-- deterministic delivery route optimization with geocoded nearest-neighbour routing and address-sort fallback;
-- consistent role-based authority across owner, manager, and staff workflows;
-- audit events for order, credit, outbound, delivery, route, and payment mutations;
-- production environment template, CI workflows, release archive workflow, changelog, and expanded documentation.
+- provider-correct STT, OCR, and parser fallback configuration for OpenAI, Google Vision, Sarvam, or review-only mode;
+- duplicate inbound message protection for provider webhook retries;
+- review/correction APIs for unparsed or operator-verified orders;
+- guarded order lifecycle transitions;
+- auth-aware frontend API client with operator login/logout;
+- pilot dashboard surfaces for Review Queue, Daily Closing, order inspection, and audit trail visibility;
+- release roadmap and pilot readiness documentation.
 
-See [`docs/RELEASE_NOTES_v2.2.0.md`](docs/RELEASE_NOTES_v2.2.0.md) for full release notes.
+See [`docs/RELEASE_NOTES_v2.3.0.md`](docs/RELEASE_NOTES_v2.3.0.md) for full release notes.
 
 ### Security hardening
 
@@ -298,6 +302,9 @@ See [`SECURITY.md`](SECURITY.md) for the production checklist and trust-boundary
 
 ## Roadmap
 
+See [`ROADMAP.md`](ROADMAP.md) for the current commercial maturity roadmap.
+
+- [x] Release 1 Commercial Foundation: repo health, provider correctness, review workflow, auth-enabled pilot UI, auditability, tests, and adoption documentation
 - [x] Voice note transcription through a configurable OpenAI or Sarvam Saaras audio adapter, with safe `needs_review` fallback when no key is configured — see `docs/AI_PROVIDERS.md`
 - [x] Outbound WhatsApp confirmation records for order lifecycle events, simulated locally and ready for provider dispatch
 - [x] Delivery assignment, delivery status lifecycle, and route-ordered agent stop lists

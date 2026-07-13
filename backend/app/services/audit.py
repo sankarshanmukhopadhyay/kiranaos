@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import select
@@ -38,6 +39,9 @@ def list_audit_events(
     limit: int = 100,
     entity_type: str | None = None,
     entity_id: str | None = None,
+    action: AuditAction | None = None,
+    since: datetime | None = None,
+    until: datetime | None = None,
 ) -> list[AuditEvent]:
     stmt = (
         select(AuditEvent)
@@ -49,4 +53,10 @@ def list_audit_events(
         stmt = stmt.where(AuditEvent.entity_type == entity_type)
     if entity_id:
         stmt = stmt.where(AuditEvent.entity_id == entity_id)
+    if action:
+        stmt = stmt.where(AuditEvent.action == action)
+    if since:
+        stmt = stmt.where(AuditEvent.created_at >= since)
+    if until:
+        stmt = stmt.where(AuditEvent.created_at <= until)
     return list(db.scalars(stmt).all())

@@ -11,6 +11,7 @@ Route organisation:
   /analytics/*                 — daily metrics, top items, input methods
 """
 
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Form, Header, HTTPException, Query, Request, Response
@@ -18,13 +19,15 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.db.session import get_db
-from app.models.domain import MessageType, Operator, OperatorRole, OrderStatus, Store
+from app.models.domain import AuditAction, MessageType, Operator, OperatorRole, OrderStatus, Store
 from app.schemas.domain import (
     AmountUpdateIn,
     AuditEventOut,
     CreditAdjustIn,
     CustomerCreateIn,
     CustomerOut,
+    CustomerUpdateIn,
+    DailyClosingOut,
     DailyMetric,
     DashboardSummary,
     DeliveryAgentCreateIn,
@@ -38,50 +41,55 @@ from app.schemas.domain import (
     LoginIn,
     OperatorCreateIn,
     OperatorOut,
+    OrderCorrectionIn,
     OrderOut,
+    OrderReviewResolveIn,
     OutboundConfirmationIn,
     OutboundMessageOut,
     PaymentOut,
-    RouteStop,
     RouteOptimizeIn,
     RouteOptimizeOut,
+    RouteStop,
     StatusUpdateIn,
     StoreCreateIn,
     StoreOut,
-    TopItem,
     TokenOut,
+    TopItem,
     UpiWebhookIn,
 )
+from app.services.adapters import validate_twilio_signature
 from app.services.audit import list_audit_events
 from app.services.auth import (
     authenticate_operator,
     create_access_token,
     create_operator,
-    decode_access_token,
     current_store_id,
+    decode_access_token,
     ensure_default_store,
     operator_count,
     require_roles,
 )
-from app.services.adapters import validate_twilio_signature
 from app.services.ingestion import (
+    _is_dormant,
     adjust_credit,
+    correct_order_items,
     create_customer,
+    daily_closing,
     daily_metrics,
     dashboard_summary,
     get_customer_with_dormant,
     get_ledger,
     get_order,
-    input_method_stats,
     ingest_message,
+    input_method_stats,
     list_customers,
     list_orders,
+    resolve_order_review,
     top_items,
+    update_customer,
     update_order_amount,
     update_order_status,
-    _is_dormant,
 )
-from app.services.security import verify_upi_webhook_signature
 from app.services.operations import (
     assign_delivery,
     create_delivery_agent,
@@ -92,6 +100,7 @@ from app.services.operations import (
     route_for_agent,
     update_delivery_status,
 )
+from app.services.security import verify_upi_webhook_signature
 
 router = APIRouter()
 DbDep = Annotated[Session, Depends(get_db)]
@@ -105,7 +114,15 @@ StaffDep = Annotated[object, Depends(require_roles(OperatorRole.owner, OperatorR
 
 @router.get("/health")
 def health() -> dict:
-    return {"status": "ok", "service": get_settings().app_name}
+    settings = get_settings()
+    return {
+        "status": "ok",
+        "service": settings.app_name,
+        "version": settings.app_version,
+        "demo_mode": settings.demo_mode,
+        "auth_required": settings.auth_required,
+        "providers": {"stt": settings.stt_provider, "ocr": settings.ocr_provider, "parser_ai": settings.parser_ai_provider},
+    }
 
 
 # ── Stores / operators ────────────────────────────────────────────────────────
@@ -154,7 +171,7 @@ def register_operator(
 @router.post("/auth/login", response_model=TokenOut)
 def login(payload: LoginIn, db: DbDep):
     operator = authenticate_operator(db, payload.username, payload.password, payload.store_id)
-    return TokenOut(access_token=create_access_token(operator), operator=operator)
+    return TokenOut(access_token=create_access_token(operator), operator=OperatorOut.model_validate(operator))
 
 
 # ── Dashboard ──────────────────────────────────────────────────────────────────
@@ -162,6 +179,11 @@ def login(payload: LoginIn, db: DbDep):
 @router.get("/dashboard/summary", response_model=DashboardSummary)
 def summary(db: DbDep, store_id: StoreDep):
     return dashboard_summary(db, store_id=store_id)
+
+
+@router.get("/dashboard/daily-closing", response_model=DailyClosingOut)
+def closing_summary(db: DbDep, store_id: StoreDep, day: str | None = Query(default=None)):
+    return daily_closing(db, store_id=store_id, day=day)
 
 
 # ── Ingestion ──────────────────────────────────────────────────────────────────
@@ -268,7 +290,37 @@ def set_order_status(order_id: int, payload: StatusUpdateIn, db: DbDep, store_id
     try:
         return update_order_status(db, order_id, payload.status, store_id=store_id)
     except ValueError as exc:
+        status_code = 400 if "Invalid order transition" in str(exc) else 404
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+
+
+@router.patch("/orders/{order_id}/items", response_model=OrderOut)
+def correct_order(
+    order_id: int,
+    payload: OrderCorrectionIn,
+    db: DbDep,
+    store_id: StoreDep,
+    _operator: StaffDep,
+):
+    try:
+        return correct_order_items(db, order_id, payload, store_id=store_id)
+    except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/orders/{order_id}/review/resolve", response_model=OrderOut)
+def resolve_review(
+    order_id: int,
+    payload: OrderReviewResolveIn,
+    db: DbDep,
+    store_id: StoreDep,
+    _operator: StaffDep,
+):
+    try:
+        return resolve_order_review(db, order_id, payload, store_id=store_id)
+    except ValueError as exc:
+        status_code = 400 if "Review can only" in str(exc) or "Invalid order transition" in str(exc) else 404
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
 
 
 @router.patch("/orders/{order_id}/amount", response_model=OrderOut)
@@ -330,6 +382,23 @@ def customer_detail(customer_id: int, db: DbDep, store_id: StoreDep):
     out = CustomerOut.model_validate(c)
     out.dormant = dormant
     return out
+
+
+@router.patch("/customers/{customer_id}", response_model=CustomerOut)
+def edit_customer(
+    customer_id: int,
+    payload: CustomerUpdateIn,
+    db: DbDep,
+    store_id: StoreDep,
+    _operator: StaffDep,
+):
+    try:
+        c = update_customer(db, customer_id, payload, store_id=store_id)
+        out = CustomerOut.model_validate(c)
+        out.dormant = _is_dormant(c.last_order_at)
+        return out
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.post("/customers/{customer_id}/credit", response_model=CustomerOut)
@@ -459,6 +528,9 @@ def audit_events(
     _operator: ManagerDep,
     entity_type: str | None = Query(default=None),
     entity_id: str | None = Query(default=None),
+    action: AuditAction | None = Query(default=None),
+    since: datetime | None = Query(default=None),
+    until: datetime | None = Query(default=None),
     limit: int = Query(default=100, le=500),
 ):
     return list_audit_events(
@@ -466,5 +538,8 @@ def audit_events(
         store_id=store_id,
         entity_type=entity_type,
         entity_id=entity_id,
+        action=action,
+        since=since,
+        until=until,
         limit=limit,
     )

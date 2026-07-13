@@ -17,9 +17,10 @@ os.environ["KIRANA_DATABASE_URL"] = "sqlite:///./test_kiranaos.db"
 import pytest
 from fastapi.testclient import TestClient
 
+from app.db.session import Base, SessionLocal, engine
+
 # Import app after env is set — it will create tables on the test DB
 from app.main import app
-from app.db.session import Base, engine, get_db, SessionLocal
 
 
 @pytest.fixture(autouse=True)
@@ -381,8 +382,9 @@ def test_jwt_rejects_tampered_signature():
     parts = token.split(".")
     bad = ".".join([parts[0], parts[1], "tampered"])
 
-    from app.services.auth import decode_access_token
     from fastapi import HTTPException
+
+    from app.services.auth import decode_access_token
     with pytest.raises(HTTPException):
         decode_access_token(bad)
 
@@ -421,3 +423,76 @@ def test_audit_events_are_created_for_order_mutations():
     assert events.status_code == 200
     actions = [event["action"] for event in events.json()]
     assert "order_status_updated" in actions
+
+# ── Release 1 commercial foundation ──────────────────────────────────────────
+
+def test_duplicate_external_message_id_returns_existing_order_and_audit_event():
+    payload = {
+        "phone": "+919999990080",
+        "customer_name": "Duplicate Test",
+        "text": "2 kg atta",
+        "source": "twilio_whatsapp",
+        "external_message_id": "SM-DUP-1",
+    }
+    first = client.post("/api/ingest/messages", json=payload)
+    second = client.post("/api/ingest/messages", json={**payload, "text": "5 kg rice"})
+
+    assert first.status_code == 201
+    assert second.status_code == 201
+    assert first.json()["id"] == second.json()["id"]
+
+    events = client.get("/api/audit/events?action=duplicate_message_ignored")
+    assert events.status_code == 200
+    assert any(event["action"] == "duplicate_message_ignored" for event in events.json())
+
+
+def test_review_order_can_be_resolved_with_corrected_items():
+    create = client.post("/api/ingest/messages", json={
+        "phone": "+919999990081",
+        "message_type": "image",
+        "media_url": "https://example.invalid/list.jpg",
+    })
+    order_id = create.json()["id"]
+    assert create.json()["status"] == "needs_review"
+
+    resolved = client.post(f"/api/orders/{order_id}/review/resolve", json={
+        "items": [{"name": "Atta", "quantity": 5, "unit": "kg", "confidence": 1}],
+        "notes": "Reviewed from image",
+        "status": "pending",
+    })
+    assert resolved.status_code == 200
+    assert resolved.json()["status"] == "pending"
+    assert resolved.json()["items"][0]["name"] == "Atta"
+
+    events = client.get(f"/api/audit/events?entity_type=order&entity_id={order_id}")
+    actions = [event["action"] for event in events.json()]
+    assert "order_review_resolved" in actions
+    assert "order_items_corrected" in actions
+
+
+def test_invalid_order_transition_is_rejected():
+    create = client.post("/api/ingest/messages", json={"phone": "+919999990082", "text": "2 kg sugar"})
+    order_id = create.json()["id"]
+    delivered = client.patch(f"/api/orders/{order_id}/status", json={"status": "delivered"})
+    assert delivered.status_code == 400
+
+
+def test_customer_update_is_audited():
+    create = client.post("/api/customers", json={"name": "Editable", "phone": "+919999990083"})
+    customer_id = create.json()["id"]
+    updated = client.patch(f"/api/customers/{customer_id}", json={"building": "Block Z", "language_hint": "hi"})
+    assert updated.status_code == 200
+    assert updated.json()["building"] == "Block Z"
+
+    events = client.get(f"/api/audit/events?entity_type=customer&entity_id={customer_id}&action=customer_updated")
+    assert events.status_code == 200
+    assert events.json()[0]["action"] == "customer_updated"
+
+
+def test_daily_closing_returns_pilot_summary():
+    client.post("/api/ingest/messages", json={"phone": "+919999990084", "text": "2 kg rice"})
+    closing = client.get("/api/dashboard/daily-closing")
+    assert closing.status_code == 200
+    body = closing.json()
+    assert body["orders_created"] >= 1
+    assert "amount_due_total" in body

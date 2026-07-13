@@ -5,6 +5,16 @@
  */
 
 const BASE = import.meta.env.VITE_API_BASE ?? "";
+const TOKEN_KEY = "kiranaos.token";
+
+export function setAuthToken(token: string | null) {
+  if (token) localStorage.setItem(TOKEN_KEY, token);
+  else localStorage.removeItem(TOKEN_KEY);
+}
+
+export function getAuthToken() {
+  return localStorage.getItem(TOKEN_KEY);
+}
 
 // ── Types (mirror backend schemas) ───────────────────────────────────────────
 
@@ -25,10 +35,25 @@ export interface Customer {
   name:           string;
   phone:          string;
   building:       string | null;
+  address:        string | null;
   language_hint:  string | null;
   credit_balance: number;
   last_order_at:  string | null;
   dormant:        boolean;
+}
+
+export interface InboundMessage {
+  id: number;
+  source: string;
+  external_message_id: string | null;
+  message_type: MessageType;
+  raw_text: string | null;
+  extracted_text: string | null;
+  media_type: string | null;
+  language: string | null;
+  parse_status: "pending" | "parsed" | "needs_review" | "failed";
+  parse_failure_reason: string | null;
+  received_at: string;
 }
 
 export interface Order {
@@ -42,6 +67,7 @@ export interface Order {
   delivered_at: string | null;
   customer:     Customer;
   items:        OrderItem[];
+  message:      InboundMessage | null;
 }
 
 export interface DashboardSummary {
@@ -89,6 +115,35 @@ export interface Token {
   access_token: string;
   token_type: "bearer";
   operator: Operator;
+}
+
+export interface Store {
+  id: number;
+  name: string;
+  slug: string;
+  phone: string | null;
+  address: string | null;
+  created_at: string;
+}
+
+export interface DailyClosing {
+  store_id: number;
+  day: string;
+  orders_created: number;
+  delivered: number;
+  cancelled: number;
+  needs_review: number;
+  amount_due_total: number;
+  credit_extended_total: number;
+}
+
+export interface AuditEvent {
+  id: number;
+  action: string;
+  entity_type: string;
+  entity_id: string;
+  evidence: string | null;
+  created_at: string;
 }
 
 export interface OutboundMessage {
@@ -162,9 +217,12 @@ export interface Payment {
 // ── HTTP helper ────────────────────────────────────────────────────────────────
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = getAuthToken();
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (token) headers.Authorization = `Bearer ${token}`;
   const res = await fetch(`${BASE}${path}`, {
-    headers: { "Content-Type": "application/json", ...init?.headers },
     ...init,
+    headers: { ...headers, ...(init?.headers as Record<string, string> | undefined) },
   });
   if (!res.ok) {
     const body = await res.text().catch(() => "");
@@ -177,14 +235,20 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   // Auth
-  login: (username: string, password: string, store_id = 1) =>
-    req<Token>("/api/auth/login", { method: "POST", body: JSON.stringify({ username, password, store_id }) }),
+  login: async (username: string, password: string, store_id = 1) => {
+    const token = await req<Token>("/api/auth/login", { method: "POST", body: JSON.stringify({ username, password, store_id }) });
+    setAuthToken(token.access_token);
+    return token;
+  },
+  logout: () => setAuthToken(null),
+  currentStore: () => req<Store>("/api/stores/current"),
   createOperator: (data: { username: string; password: string; role?: Operator["role"]; store_id?: number }) =>
     req<Operator>("/api/operators", { method: "POST", body: JSON.stringify(data) }),
 
   // Dashboard
   summary: () =>
     req<DashboardSummary>("/api/dashboard/summary"),
+  dailyClosing: () => req<DailyClosing>("/api/dashboard/daily-closing"),
 
   // Orders
   orders: (params?: { status?: OrderStatus; customer_id?: number }) => {
@@ -199,6 +263,10 @@ export const api = {
     req<Order>(`/api/orders/${id}/status`, { method: "PATCH", body: JSON.stringify({ status }) }),
   setAmount: (id: number, amount_due: number, is_credit: boolean) =>
     req<Order>(`/api/orders/${id}/amount`, { method: "PATCH", body: JSON.stringify({ amount_due, is_credit }) }),
+  correctItems: (id: number, items: Array<{ name: string; quantity: number; unit: string; confidence?: number }>, notes?: string) =>
+    req<Order>(`/api/orders/${id}/items`, { method: "PATCH", body: JSON.stringify({ items, notes }) }),
+  resolveReview: (id: number, items: Array<{ name: string; quantity: number; unit: string; confidence?: number }>, notes?: string) =>
+    req<Order>(`/api/orders/${id}/review/resolve`, { method: "POST", body: JSON.stringify({ items, notes, status: "pending" }) }),
   confirmOrder: (id: number, body?: string) =>
     req<OutboundMessage>(`/api/orders/${id}/confirmations`, { method: "POST", body: JSON.stringify({ body }) }),
 
@@ -207,6 +275,8 @@ export const api = {
     req<Customer[]>(`/api/customers?dormant_only=${dormant_only}`),
   createCustomer: (data: { name: string; phone: string; building?: string }) =>
     req<Customer>("/api/customers", { method: "POST", body: JSON.stringify(data) }),
+  updateCustomer: (id: number, data: Partial<Pick<Customer, "name" | "building" | "address" | "language_hint">>) =>
+    req<Customer>(`/api/customers/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
   adjustCredit: (customer_id: number, amount: number, reason: string) =>
     req<Customer>(`/api/customers/${customer_id}/credit`, {
       method: "POST",
@@ -254,4 +324,10 @@ export const api = {
     req<TopItem[]>(`/api/analytics/top-items?days=${days}&limit=${limit}`),
   inputMethods: (days = 30) =>
     req<InputMethodStat[]>(`/api/analytics/input-methods?days=${days}`),
+  auditEvents: (entity_type?: string, entity_id?: number | string) => {
+    const qs = new URLSearchParams();
+    if (entity_type) qs.set("entity_type", entity_type);
+    if (entity_id) qs.set("entity_id", String(entity_id));
+    return req<AuditEvent[]>(`/api/audit/events?${qs}`);
+  },
 };

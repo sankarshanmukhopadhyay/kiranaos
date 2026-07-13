@@ -27,16 +27,19 @@ from app.models.domain import (
     OrderStatus,
     ParseStatus,
 )
-from app.services.audit import record_audit_event
 from app.schemas.domain import (
     AmountUpdateIn,
     CreditAdjustIn,
     CustomerCreateIn,
+    CustomerUpdateIn,
     IngestMessageIn,
+    OrderCorrectionIn,
+    OrderReviewResolveIn,
 )
-from app.services.adapters import extract_items_with_openai
-from app.services.parser import parse_order_text
+from app.services.adapters import extract_items_with_ai
+from app.services.audit import record_audit_event
 from app.services.auth import ensure_default_store
+from app.services.parser import parse_order_text
 from app.services.security import validate_external_media_url
 
 logger = logging.getLogger(__name__)
@@ -120,6 +123,30 @@ def create_customer(db: Session, data: CustomerCreateIn, store_id: int | None = 
     return customer
 
 
+def update_customer(db: Session, customer_id: int, data: CustomerUpdateIn, store_id: int | None = None) -> Customer:
+    customer = get_customer(db, customer_id, store_id=store_id)
+    before = {
+        "name": customer.name,
+        "building": customer.building,
+        "address": customer.address,
+        "language_hint": customer.language_hint,
+    }
+    updates = data.model_dump(exclude_unset=True)
+    for key, value in updates.items():
+        setattr(customer, key, value)
+    record_audit_event(
+        db,
+        store_id=customer.store_id,
+        action=AuditAction.customer_updated,
+        entity_type="customer",
+        entity_id=customer.id,
+        evidence={"from": before, "to": updates},
+    )
+    db.commit()
+    db.refresh(customer)
+    return customer
+
+
 def get_customer(db: Session, customer_id: int, store_id: int | None = None) -> Customer:
     stmt = select(Customer).where(Customer.id == customer_id)
     if store_id is not None:
@@ -163,7 +190,28 @@ async def ingest_message(db: Session, payload: IngestMessageIn) -> Order:
     scoped_store_id = _store_id(payload.store_id)
     customer = find_or_create_customer(db, payload, store_id=scoped_store_id)
 
+    if payload.external_message_id:
+        existing_message = db.scalar(
+            select(InboundMessage).where(
+                InboundMessage.store_id == scoped_store_id,
+                InboundMessage.source == payload.source,
+                InboundMessage.external_message_id == payload.external_message_id,
+            )
+        )
+        if existing_message and existing_message.order:
+            record_audit_event(
+                db,
+                store_id=scoped_store_id,
+                action=AuditAction.duplicate_message_ignored,
+                entity_type="inbound_message",
+                entity_id=existing_message.id,
+                evidence={"source": payload.source, "external_message_id": payload.external_message_id},
+            )
+            db.commit()
+            return _load_order(db, existing_message.order.id, store_id=scoped_store_id)
+
     text = payload.text
+    parse_failure_reason: str | None = None
 
     # OCR / transcription adapter — only runs if configured
     if not text and payload.media_url:
@@ -171,19 +219,31 @@ async def ingest_message(db: Session, payload: IngestMessageIn) -> Order:
             validate_external_media_url(payload.media_url)
         except ValueError as exc:
             logger.warning("Rejected unsafe media URL: %s", exc)
+            parse_failure_reason = "unsafe_media_url"
             payload.media_url = None
 
     if not text and payload.media_url:
         if payload.message_type == MessageType.image:
             try:
-                from app.services.ocr.google_vision import extract_text
-                text = await extract_text(payload.media_url)
+                provider = get_settings().ocr_provider
+                if provider == "sarvam":
+                    from app.services.ocr.sarvam_vision import extract_text as sarvam_extract_text
+                    text = await sarvam_extract_text(payload.media_url)
+                elif provider == "google_vision":
+                    from app.services.ocr.google_vision import extract_text as google_extract_text
+                    text = await google_extract_text(payload.media_url)
+                else:
+                    text = None
+                if not text:
+                    parse_failure_reason = "ocr_failed_or_unconfigured"
             except Exception as exc:
+                parse_failure_reason = "ocr_failed"
                 logger.warning("OCR unavailable: %s", exc)
         elif payload.message_type == MessageType.voice:
             from app.services.voice import transcribe_voice_note
             text = await transcribe_voice_note(payload.media_url, payload.media_type)
             if not text:
+                parse_failure_reason = "stt_failed_or_unconfigured"
                 logger.info("Voice transcription not configured or failed — order set to needs_review")
 
     message = InboundMessage(
@@ -197,19 +257,28 @@ async def ingest_message(db: Session, payload: IngestMessageIn) -> Order:
         media_url=payload.media_url,
         media_type=payload.media_type,
         language=payload.language,
+        parse_failure_reason=parse_failure_reason,
     )
     db.add(message)
     db.flush()
 
     parsed_items = parse_order_text(text)
     if text and not parsed_items:
-        ai_items = extract_items_with_openai(text)
+        ai_items = extract_items_with_ai(text)
         if ai_items:
             parsed_items = parse_order_text("\n".join(ai_items))
+
+    threshold = get_settings().parse_confidence_threshold
+    low_confidence = bool(parsed_items) and any(item.confidence < threshold for item in parsed_items)
     status = OrderStatus.pending if parsed_items else OrderStatus.needs_review
     message.parse_status = ParseStatus.parsed if parsed_items else ParseStatus.needs_review
+    if low_confidence and not parse_failure_reason:
+        parse_failure_reason = "low_confidence_parse"
+        message.parse_failure_reason = parse_failure_reason
 
     notes: str | None = None
+    if low_confidence:
+        notes = "Low-confidence item detected. Verify before packing."
     if not parsed_items:
         if payload.message_type == MessageType.image:
             notes = "Image received. Configure Google Vision OCR to auto-extract items."
@@ -258,6 +327,7 @@ def _load_order(db: Session, order_id: int, store_id: int | None = None) -> Orde
         .options(
             selectinload(Order.customer),
             selectinload(Order.items),
+            selectinload(Order.message),
         )
     )
     if not order:
@@ -279,7 +349,7 @@ def list_orders(
 ) -> list[Order]:
     stmt = (
         select(Order)
-        .options(selectinload(Order.customer), selectinload(Order.items))
+        .options(selectinload(Order.customer), selectinload(Order.items), selectinload(Order.message))
         .order_by(Order.created_at.desc())
         .limit(limit)
         .offset(offset)
@@ -293,9 +363,26 @@ def list_orders(
     return list(db.scalars(stmt).all())
 
 
+ALLOWED_ORDER_TRANSITIONS: dict[OrderStatus, set[OrderStatus]] = {
+    OrderStatus.needs_review: {OrderStatus.pending, OrderStatus.cancelled},
+    OrderStatus.pending: {OrderStatus.packed, OrderStatus.cancelled, OrderStatus.needs_review},
+    OrderStatus.packed: {OrderStatus.delivered, OrderStatus.cancelled},
+    OrderStatus.delivered: set(),
+    OrderStatus.cancelled: set(),
+}
+
+
+def _assert_transition_allowed(current: OrderStatus, target: OrderStatus) -> None:
+    if current == target:
+        return
+    if target not in ALLOWED_ORDER_TRANSITIONS[current]:
+        raise ValueError(f"Invalid order transition: {current} -> {target}")
+
+
 def update_order_status(db: Session, order_id: int, status: OrderStatus, store_id: int | None = None) -> Order:
     order = _load_order(db, order_id, store_id=store_id)
     previous = order.status
+    _assert_transition_allowed(previous, status)
     order.status = status
     if status == OrderStatus.delivered:
         order.delivered_at = datetime.now(timezone.utc)
@@ -308,6 +395,62 @@ def update_order_status(db: Session, order_id: int, status: OrderStatus, store_i
         evidence={"from": str(previous), "to": str(status)},
     )
     db.commit()
+    return _load_order(db, order_id, store_id=store_id)
+
+
+def correct_order_items(db: Session, order_id: int, data: OrderCorrectionIn, store_id: int | None = None) -> Order:
+    order = _load_order(db, order_id, store_id=store_id)
+    before = [
+        {"id": item.id, "name": item.name, "quantity": item.quantity, "unit": item.unit, "confidence": item.confidence}
+        for item in order.items
+    ]
+    for item in list(order.items):
+        db.delete(item)
+    db.flush()
+    for correction_item in data.items:
+        db.add(OrderItem(
+            order_id=order.id,
+            name=correction_item.name,
+            quantity=correction_item.quantity,
+            unit=correction_item.unit,
+            confidence=correction_item.confidence,
+        ))
+    if data.notes is not None:
+        order.notes = data.notes
+    record_audit_event(
+        db,
+        store_id=order.store_id,
+        action=AuditAction.order_items_corrected,
+        entity_type="order",
+        entity_id=order.id,
+        evidence={"from": before, "to": [item.model_dump() for item in data.items]},
+    )
+    db.commit()
+    db.expire_all()
+    return _load_order(db, order_id, store_id=store_id)
+
+
+def resolve_order_review(db: Session, order_id: int, data: OrderReviewResolveIn, store_id: int | None = None) -> Order:
+    if data.status not in {OrderStatus.pending, OrderStatus.cancelled}:
+        raise ValueError("Review can only resolve an order to pending or cancelled")
+    correction = OrderCorrectionIn(items=data.items, notes=data.notes)
+    order = correct_order_items(db, order_id, correction, store_id=store_id)
+    previous = order.status
+    _assert_transition_allowed(previous, data.status)
+    order.status = data.status
+    if order.message:
+        order.message.parse_status = ParseStatus.parsed if data.items else ParseStatus.needs_review
+        order.message.parse_failure_reason = None if data.items else order.message.parse_failure_reason
+    record_audit_event(
+        db,
+        store_id=order.store_id,
+        action=AuditAction.order_review_resolved,
+        entity_type="order",
+        entity_id=order.id,
+        evidence={"from": str(previous), "to": str(data.status), "items": [item.model_dump() for item in data.items]},
+    )
+    db.commit()
+    db.expire_all()
     return _load_order(db, order_id, store_id=store_id)
 
 
@@ -369,12 +512,10 @@ def adjust_credit(db: Session, customer_id: int, data: CreditAdjustIn, store_id:
 
 def get_ledger(db: Session, customer_id: int, store_id: int | None = None) -> list[LedgerEntry]:
     get_customer(db, customer_id, store_id=store_id)
-    return list(db.scalars(
-        select(LedgerEntry)
-        .where(LedgerEntry.customer_id == customer_id)
-        .where(LedgerEntry.store_id == store_id if store_id is not None else True)
-        .order_by(LedgerEntry.created_at.desc())
-    ).all())
+    stmt = select(LedgerEntry).where(LedgerEntry.customer_id == customer_id)
+    if store_id is not None:
+        stmt = stmt.where(LedgerEntry.store_id == store_id)
+    return list(db.scalars(stmt.order_by(LedgerEntry.created_at.desc())).all())
 
 
 # ── Dashboard summary ─────────────────────────────────────────────────────────
@@ -382,34 +523,30 @@ def get_ledger(db: Session, customer_id: int, store_id: int | None = None) -> li
 def dashboard_summary(db: Session, store_id: int | None = None) -> dict:
     today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
 
-    status_counts = dict(
-        db.execute(
-            select(Order.status, func.count(Order.id))
-            .where(Order.store_id == store_id if store_id is not None else True)
-            .group_by(Order.status)
-        ).all()
+    status_stmt = select(Order.status, func.count(Order.id)).group_by(Order.status)
+    if store_id is not None:
+        status_stmt = status_stmt.where(Order.store_id == store_id)
+    status_counts: dict[OrderStatus, int] = {status: count for status, count in db.execute(status_stmt).all()}
+
+    dormant_stmt = select(func.count(Customer.id)).where(
+        (Customer.last_order_at.is_(None)) | (Customer.last_order_at < dormant_cutoff())
     )
+    if store_id is not None:
+        dormant_stmt = dormant_stmt.where(Customer.store_id == store_id)
+    dormant = db.scalar(dormant_stmt) or 0
 
-    dormant = db.scalar(
-        select(func.count(Customer.id)).where(
-            (Customer.store_id == store_id if store_id is not None else True),
-            (Customer.last_order_at.is_(None))
-            | (Customer.last_order_at < dormant_cutoff())
-        )
-    ) or 0
+    delivered_stmt = select(func.count(Order.id)).where(
+        Order.status == OrderStatus.delivered,
+        Order.delivered_at >= today_start,
+    )
+    if store_id is not None:
+        delivered_stmt = delivered_stmt.where(Order.store_id == store_id)
+    delivered_today = db.scalar(delivered_stmt) or 0
 
-    delivered_today = db.scalar(
-        select(func.count(Order.id)).where(
-            Order.status == OrderStatus.delivered,
-            Order.store_id == store_id if store_id is not None else True,
-            Order.delivered_at >= today_start,
-        )
-    ) or 0
-
-    total_credit = db.scalar(
-        select(func.coalesce(func.sum(Customer.credit_balance), 0.0))
-        .where(Customer.store_id == store_id if store_id is not None else True)
-    ) or 0.0
+    credit_stmt = select(func.coalesce(func.sum(Customer.credit_balance), 0.0))
+    if store_id is not None:
+        credit_stmt = credit_stmt.where(Customer.store_id == store_id)
+    total_credit = db.scalar(credit_stmt) or 0.0
 
     return {
         "pending":           status_counts.get(OrderStatus.pending, 0),
@@ -421,24 +558,42 @@ def dashboard_summary(db: Session, store_id: int | None = None) -> dict:
     }
 
 
+def daily_closing(db: Session, store_id: int, day: str | None = None) -> dict:
+    if day:
+        start = datetime.fromisoformat(day).replace(tzinfo=timezone.utc)
+    else:
+        start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    end = start + timedelta(days=1)
+    rows = list(db.scalars(select(Order).where(Order.store_id == store_id, Order.created_at >= start, Order.created_at < end)).all())
+    return {
+        "store_id": store_id,
+        "day": start.date().isoformat(),
+        "orders_created": len(rows),
+        "delivered": sum(1 for o in rows if o.status == OrderStatus.delivered),
+        "cancelled": sum(1 for o in rows if o.status == OrderStatus.cancelled),
+        "needs_review": sum(1 for o in rows if o.status == OrderStatus.needs_review),
+        "amount_due_total": float(sum(o.amount_due for o in rows)),
+        "credit_extended_total": float(sum(o.amount_due for o in rows if o.is_credit)),
+    }
+
+
 # ── Analytics ─────────────────────────────────────────────────────────────────
 
 def daily_metrics(db: Session, days: int = 7, store_id: int | None = None) -> list[dict]:
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-    rows = db.execute(
+    metrics_stmt = (
         select(
             func.date(Order.created_at).label("day"),
             func.count(Order.id).label("orders"),
             func.coalesce(func.sum(Order.amount_due), 0.0).label("revenue"),
         )
-        .where(
-            Order.created_at >= cutoff,
-            Order.status != OrderStatus.cancelled,
-            Order.store_id == store_id if store_id is not None else True,
-        )
+        .where(Order.created_at >= cutoff, Order.status != OrderStatus.cancelled)
         .group_by("day")
         .order_by("day")
-    ).all()
+    )
+    if store_id is not None:
+        metrics_stmt = metrics_stmt.where(Order.store_id == store_id)
+    rows = db.execute(metrics_stmt).all()
     return [{"day": str(r.day), "orders": r.orders, "revenue": float(r.revenue)} for r in rows]
 
 
@@ -448,22 +603,21 @@ def top_items(db: Session, days: int = 30, limit: int = 10, store_id: int | None
     Returns item name, order count, and total quantity ordered.
     """
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-    rows = db.execute(
+    top_items_stmt = (
         select(
             OrderItem.name,
             func.count(OrderItem.id).label("count"),
             func.sum(OrderItem.quantity).label("total_quantity"),
         )
         .join(Order, OrderItem.order_id == Order.id)
-        .where(
-            Order.created_at >= cutoff,
-            Order.status != OrderStatus.cancelled,
-            Order.store_id == store_id if store_id is not None else True,
-        )
+        .where(Order.created_at >= cutoff, Order.status != OrderStatus.cancelled)
         .group_by(OrderItem.name)
         .order_by(func.count(OrderItem.id).desc())
         .limit(limit)
-    ).all()
+    )
+    if store_id is not None:
+        top_items_stmt = top_items_stmt.where(Order.store_id == store_id)
+    rows = db.execute(top_items_stmt).all()
     return [
         {"name": r.name, "count": r.count, "total_quantity": float(r.total_quantity)}
         for r in rows
@@ -472,16 +626,16 @@ def top_items(db: Session, days: int = 30, limit: int = 10, store_id: int | None
 
 def input_method_stats(db: Session, days: int = 30, store_id: int | None = None) -> list[dict]:
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-    rows = db.execute(
+    input_stmt = (
         select(
             InboundMessage.message_type,
             func.count(InboundMessage.id).label("count"),
         )
-        .where(
-            InboundMessage.received_at >= cutoff,
-            InboundMessage.store_id == store_id if store_id is not None else True,
-        )
+        .where(InboundMessage.received_at >= cutoff)
         .group_by(InboundMessage.message_type)
         .order_by(func.count(InboundMessage.id).desc())
-    ).all()
+    )
+    if store_id is not None:
+        input_stmt = input_stmt.where(InboundMessage.store_id == store_id)
+    rows = db.execute(input_stmt).all()
     return [{"message_type": str(r.message_type), "count": r.count} for r in rows]

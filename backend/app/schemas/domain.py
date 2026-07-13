@@ -14,9 +14,9 @@ from app.models.domain import (
     OperatorRole,
     OrderStatus,
     OutboundStatus,
+    ParseStatus,
     PaymentStatus,
 )
-
 
 # ── Shared ─────────────────────────────────────────────────────────────────────
 
@@ -29,6 +29,23 @@ class OrderItemOut(BaseModel):
 
     model_config = {"from_attributes": True}
 
+
+
+
+class InboundMessageOut(BaseModel):
+    id: int
+    source: str
+    external_message_id: str | None
+    message_type: MessageType
+    raw_text: str | None
+    extracted_text: str | None
+    media_type: str | None
+    language: str | None
+    parse_status: ParseStatus
+    parse_failure_reason: str | None
+    received_at: datetime
+
+    model_config = {"from_attributes": True}
 
 class CustomerOut(BaseModel):
     id:              int
@@ -57,6 +74,7 @@ class OrderOut(BaseModel):
     delivered_at: datetime | None
     customer:     CustomerOut
     items:        list[OrderItemOut]
+    message:      InboundMessageOut | None = None
 
     model_config = {"from_attributes": True}
 
@@ -141,12 +159,40 @@ class StatusUpdateIn(BaseModel):
     status: OrderStatus
 
 
+class OrderItemCorrectionIn(BaseModel):
+    id: int | None = None
+    name: str = Field(..., min_length=1, max_length=160)
+    quantity: float = Field(default=1.0, gt=0)
+    unit: str = Field(default="pcs", min_length=1, max_length=32)
+    confidence: float = Field(default=1.0, ge=0, le=1)
+
+
+class OrderReviewResolveIn(BaseModel):
+    items: list[OrderItemCorrectionIn] = Field(default_factory=list)
+    notes: str | None = Field(default=None, max_length=500)
+    status: OrderStatus = OrderStatus.pending
+
+
+class OrderCorrectionIn(BaseModel):
+    items: list[OrderItemCorrectionIn] = Field(default_factory=list)
+    notes: str | None = Field(default=None, max_length=500)
+
+
 class AmountUpdateIn(BaseModel):
     amount_due: float = Field(..., ge=0)
     is_credit:  bool  = False
 
 
 # ── Customer mutations ─────────────────────────────────────────────────────────
+
+class CustomerUpdateIn(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    building: str | None = None
+    address: str | None = None
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
+    language_hint: str | None = None
+
 
 class CustomerCreateIn(BaseModel):
     name:          str         = Field(..., min_length=1, max_length=120)
@@ -182,6 +228,18 @@ class DashboardSummary(BaseModel):
     needs_review:     int
     dormant_customers: int
     total_credit:     float
+
+
+class DailyClosingOut(BaseModel):
+    store_id: int
+    day: str
+    orders_created: int
+    delivered: int
+    cancelled: int
+    needs_review: int
+    amount_due_total: float
+    credit_extended_total: float
+
 
 
 # ── Ledger ─────────────────────────────────────────────────────────────────────

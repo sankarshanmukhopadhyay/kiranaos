@@ -32,33 +32,35 @@ def sarvam_configured(monkeypatch):
 
 @pytest.mark.asyncio
 @respx.mock
-async def test_sarvam_stt_transcribes_on_success():
+async def test_sarvam_stt_transcribes_on_success(monkeypatch):
     from app.services.stt import sarvam
+    monkeypatch.setattr(sarvam, "validate_external_media_url", lambda url: None)
 
-    respx.get("https://example.com/voice.ogg").mock(
+    respx.get("https://storage.googleapis.com/kiranaos-test/voice.ogg").mock(
         return_value=httpx.Response(200, content=b"fake-audio-bytes")
     )
     respx.post("https://api.sarvam.ai/speech-to-text").mock(
         return_value=httpx.Response(200, json={"transcript": "atta 5kg, dal 1kg"})
     )
 
-    result = await sarvam.transcribe("https://example.com/voice.ogg", "audio/ogg")
+    result = await sarvam.transcribe("https://storage.googleapis.com/kiranaos-test/voice.ogg", "audio/ogg")
     assert result == "atta 5kg, dal 1kg"
 
 
 @pytest.mark.asyncio
 @respx.mock
-async def test_sarvam_stt_returns_none_on_upstream_error():
+async def test_sarvam_stt_returns_none_on_upstream_error(monkeypatch):
     from app.services.stt import sarvam
+    monkeypatch.setattr(sarvam, "validate_external_media_url", lambda url: None)
 
-    respx.get("https://example.com/voice.ogg").mock(
+    respx.get("https://storage.googleapis.com/kiranaos-test/voice.ogg").mock(
         return_value=httpx.Response(200, content=b"fake-audio-bytes")
     )
     respx.post("https://api.sarvam.ai/speech-to-text").mock(
         return_value=httpx.Response(503, json={"error": "upstream unavailable"})
     )
 
-    result = await sarvam.transcribe("https://example.com/voice.ogg", "audio/ogg")
+    result = await sarvam.transcribe("https://storage.googleapis.com/kiranaos-test/voice.ogg", "audio/ogg")
     assert result is None
 
 

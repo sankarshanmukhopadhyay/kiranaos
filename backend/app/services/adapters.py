@@ -4,11 +4,14 @@ import base64
 import hashlib
 import hmac
 import json
-from urllib.parse import urlencode
+import logging
 from urllib.error import URLError
+from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from app.core.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 
 def validate_twilio_signature(signature: str | None, url: str, params: dict[str, str]) -> bool:
@@ -26,14 +29,30 @@ def validate_twilio_signature(signature: str | None, url: str, params: dict[str,
     return hmac.compare_digest(expected, signature)
 
 
+def extract_items_with_ai(text: str) -> list[str] | None:
+    """Provider-dispatched LLM parser fallback. Always fails closed to None."""
+    provider = get_settings().parser_ai_provider
+    if provider == "none":
+        return None
+    if provider == "sarvam":
+        try:
+            from app.services.llm.sarvam_chat import extract_items
+            return extract_items(text)
+        except Exception as exc:
+            logger.warning("Sarvam parser fallback failed: %s", exc)
+            return None
+    return extract_items_with_openai(text)
+
+
 def extract_items_with_openai(text: str) -> list[str] | None:
     """Return normalized grocery item labels using OpenAI when configured."""
-    api_key = get_settings().openai_api_key
+    settings = get_settings()
+    api_key = settings.openai_api_key
     if not api_key:
         return None
 
     body = {
-        "model": "gpt-4o-mini",
+        "model": settings.openai_parser_model,
         "temperature": 0,
         "response_format": {"type": "json_object"},
         "messages": [
@@ -55,7 +74,7 @@ def extract_items_with_openai(text: str) -> list[str] | None:
     )
 
     try:
-        with urlopen(request, timeout=30) as response:
+        with urlopen(request, timeout=settings.provider_timeout_seconds) as response:
             data = json.loads(response.read().decode())
         content = data.get("choices", [{}])[0].get("message", {}).get("content", "{}")
         parsed = json.loads(content)

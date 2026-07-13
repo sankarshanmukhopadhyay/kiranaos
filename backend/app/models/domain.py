@@ -13,7 +13,14 @@ from datetime import datetime, timezone
 from enum import StrEnum
 
 from sqlalchemy import (
-    DateTime, Enum, Float, ForeignKey, Integer, String, Text, UniqueConstraint,
+    DateTime,
+    Enum,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -82,6 +89,10 @@ class AuditAction(StrEnum):
     delivery_status_updated = "delivery_status_updated"
     route_optimized = "route_optimized"
     payment_reconciled = "payment_reconciled"
+    duplicate_message_ignored = "duplicate_message_ignored"
+    order_review_resolved = "order_review_resolved"
+    order_items_corrected = "order_items_corrected"
+    customer_updated = "customer_updated"
 
 
 # ── Store / tenancy ───────────────────────────────────────────────────────────
@@ -144,6 +155,7 @@ class Customer(Base):
 class InboundMessage(Base):
     """Raw WhatsApp message as received from the provider webhook."""
     __tablename__ = "inbound_messages"
+    __table_args__ = (UniqueConstraint("store_id", "source", "external_message_id", name="uq_inbound_store_source_external"),)
 
     id:           Mapped[int]         = mapped_column(Integer, primary_key=True)
     store_id:     Mapped[int]         = mapped_column(ForeignKey("stores.id"), default=1, index=True)
@@ -157,6 +169,7 @@ class InboundMessage(Base):
     media_type:   Mapped[str | None]  = mapped_column(String(120), nullable=True)
     language:     Mapped[str | None]  = mapped_column(String(40), nullable=True)
     parse_status: Mapped[ParseStatus] = mapped_column(Enum(ParseStatus), default=ParseStatus.pending)
+    parse_failure_reason: Mapped[str | None] = mapped_column(String(120), nullable=True)
     received_at:  Mapped[datetime]    = mapped_column(DateTime(timezone=True), default=utcnow)
 
     customer: Mapped[Customer]       = relationship(back_populates="messages")

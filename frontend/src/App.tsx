@@ -1,632 +1,306 @@
-/**
- * App.tsx — KiranaOS dashboard.
- *
- * Four views: Dashboard (inbox + orders), Customers, Udhaari, Analytics.
- * All data fetches from the real backend API. Falls back gracefully when
- * the backend is unreachable (shows last loaded data + error banner).
- *
- * Design tokens: ink navy sidebar, warm paper main panel, saffron accent,
- * Space Grotesk headings, Inter body — same visual identity as KiranaOS v1.
- */
-
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import "./styles.css";
-import { SIDEBAR_ICONS, SIDEBAR_LABELS } from "./sidebarMeta";
+import { api, AuditEvent, Customer, DailyClosing, DashboardSummary, getAuthToken, Order, OrderStatus, Store } from "./lib/api";
 
-import {
-  api,
-  Customer,
-  DailyMetric,
-  DashboardSummary,
-  InputMethodStat,
-  Order,
-  OrderStatus,
-  TopItem,
-} from "./lib/api";
-
-// ── State ─────────────────────────────────────────────────────────────────────
-
-interface AppState {
-  view:        "dashboard" | "customers" | "udhaari" | "analytics";
-  summary:     DashboardSummary;
-  orders:      Order[];
-  customers:   Customer[];
-  daily:       DailyMetric[];
-  topItems:    TopItem[];
-  inputStats:  InputMethodStat[];
-  loading:     boolean;
-  error:       string | null;
-  filter:      OrderStatus | "all";
-  search:      string;
-}
+type View = "dashboard" | "review" | "customers" | "closing";
 
 const EMPTY_SUMMARY: DashboardSummary = {
-  pending: 0, packed: 0, delivered_today: 0,
-  needs_review: 0, dormant_customers: 0, total_credit: 0,
+  pending: 0,
+  packed: 0,
+  delivered_today: 0,
+  needs_review: 0,
+  dormant_customers: 0,
+  total_credit: 0,
 };
 
-const initial: AppState = {
-  view: "dashboard", summary: EMPTY_SUMMARY,
-  orders: [], customers: [], daily: [], topItems: [], inputStats: [],
-  loading: true, error: null, filter: "all", search: "",
+const STATUS_FLOW: Record<OrderStatus, OrderStatus[]> = {
+  needs_review: ["pending", "cancelled"],
+  pending: ["packed", "cancelled"],
+  packed: ["delivered", "cancelled"],
+  delivered: [],
+  cancelled: [],
 };
 
-type Action =
-  | { type: "SET_VIEW"; view: AppState["view"] }
-  | { type: "LOADED"; data: Partial<AppState> }
-  | { type: "ERROR"; msg: string }
-  | { type: "SET_FILTER"; filter: AppState["filter"] }
-  | { type: "SET_SEARCH"; search: string }
-  | { type: "ORDER_UPDATED"; order: Order }
-  | { type: "CUSTOMER_UPDATED"; customer: Customer };
+function App() {
+  const [view, setView] = useState<View>("dashboard");
+  const [summary, setSummary] = useState<DashboardSummary>(EMPTY_SUMMARY);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [store, setStore] = useState<Store | null>(null);
+  const [closing, setClosing] = useState<DailyClosing | null>(null);
+  const [selected, setSelected] = useState<Order | null>(null);
+  const [audit, setAudit] = useState<AuditEvent[]>([]);
+  const [filter, setFilter] = useState<OrderStatus | "all">("all");
+  const [error, setError] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+  const [tokenPresent, setTokenPresent] = useState(Boolean(getAuthToken()));
+  const [login, setLogin] = useState({ username: "", password: "", store_id: 1 });
 
-function reducer(s: AppState, a: Action): AppState {
-  switch (a.type) {
-    case "SET_VIEW":    return { ...s, view: a.view, loading: true, error: null };
-    case "LOADED":      return { ...s, ...a.data, loading: false, error: null };
-    case "ERROR":       return { ...s, loading: false, error: a.msg };
-    case "SET_FILTER":  return { ...s, filter: a.filter };
-    case "SET_SEARCH":  return { ...s, search: a.search };
-    case "ORDER_UPDATED":
-      return { ...s, orders: s.orders.map(o => o.id === a.order.id ? a.order : o) };
-    case "CUSTOMER_UPDATED":
-      return { ...s, customers: s.customers.map(c => c.id === a.customer.id ? a.customer : c) };
-    default: return s;
-  }
-}
+  const showToast = (msg: string) => {
+    setToast(msg);
+    window.setTimeout(() => setToast(null), 2600);
+  };
 
-// ── Toast ──────────────────────────────────────────────────────────────────────
-
-function useToast() {
-  const [msg, setMsg] = useState<string | null>(null);
-  const timer = useRef<ReturnType<typeof setTimeout>>();
-  const show = useCallback((m: string) => {
-    setMsg(m);
-    clearTimeout(timer.current);
-    timer.current = setTimeout(() => setMsg(null), 3000);
-  }, []);
-  return { msg, show };
-}
-
-// ── Main App ───────────────────────────────────────────────────────────────────
-
-export default function App() {
-  const [s, dispatch] = useReducer(reducer, initial);
-  const toast = useToast();
-
-  // ── Data loading ─────────────────────────────────────────────────────────────
-
-  const loadDashboard = useCallback(async () => {
+  const refresh = useCallback(async () => {
     try {
-      const [summary, orders] = await Promise.all([api.summary(), api.orders()]);
-      dispatch({ type: "LOADED", data: { summary, orders } });
-    } catch (e) {
-      dispatch({ type: "ERROR", msg: String(e) });
-    }
-  }, []);
-
-  const loadCustomers = useCallback(async () => {
-    try {
-      const customers = await api.customers();
-      dispatch({ type: "LOADED", data: { customers } });
-    } catch (e) {
-      dispatch({ type: "ERROR", msg: String(e) });
-    }
-  }, []);
-
-  const loadAnalytics = useCallback(async () => {
-    try {
-      const [daily, topItems, inputStats] = await Promise.all([
-        api.daily(7), api.topItems(30, 8), api.inputMethods(30),
+      setError(null);
+      const [nextSummary, nextOrders, nextCustomers, nextStore, nextClosing] = await Promise.all([
+        api.summary(),
+        api.orders(),
+        api.customers(),
+        api.currentStore(),
+        api.dailyClosing(),
       ]);
-      dispatch({ type: "LOADED", data: { daily, topItems, inputStats } });
-    } catch (e) {
-      dispatch({ type: "ERROR", msg: String(e) });
+      setSummary(nextSummary);
+      setOrders(nextOrders);
+      setCustomers(nextCustomers);
+      setStore(nextStore);
+      setClosing(nextClosing);
+    } catch (err) {
+      setError(String(err));
     }
   }, []);
 
   useEffect(() => {
-    if (s.view === "dashboard") loadDashboard();
-    else if (s.view === "customers" || s.view === "udhaari") loadCustomers();
-    else if (s.view === "analytics") loadAnalytics();
-  }, [s.view, loadDashboard, loadCustomers, loadAnalytics]);
+    void refresh();
+  }, [refresh]);
 
-  // ── Actions ───────────────────────────────────────────────────────────────────
+  const visibleOrders = useMemo(
+    () => orders.filter((order) => filter === "all" || order.status === filter),
+    [orders, filter],
+  );
 
-  const setStatus = async (id: number, status: OrderStatus) => {
+  const reviewOrders = useMemo(
+    () => orders.filter((order) => order.status === "needs_review"),
+    [orders],
+  );
+
+  async function handleLogin() {
     try {
-      const updated = await api.setStatus(id, status);
-      dispatch({ type: "ORDER_UPDATED", order: updated });
-      toast.show(`Order #${id} → ${status}`);
-      // Refresh summary counts
-      const summary = await api.summary();
-      dispatch({ type: "LOADED", data: { summary } });
-    } catch (e) {
-      toast.show(`Failed: ${e}`);
+      await api.login(login.username, login.password, login.store_id);
+      setTokenPresent(true);
+      showToast("Signed in");
+      await refresh();
+    } catch (err) {
+      showToast(`Login failed: ${err}`);
     }
-  };
+  }
 
-  const settleCredit = async (customerId: number, amount: number, name: string) => {
+  async function handleLogout() {
+    api.logout();
+    setTokenPresent(false);
+    showToast("Signed out");
+  }
+
+  async function loadAudit(order: Order) {
+    setSelected(order);
     try {
-      const updated = await api.adjustCredit(customerId, -amount, "Cash payment");
-      dispatch({ type: "CUSTOMER_UPDATED", customer: updated });
-      toast.show(`₹${amount} recorded from ${name}`);
-    } catch (e) {
-      toast.show(`Failed: ${e}`);
+      setAudit(await api.auditEvents("order", order.id));
+    } catch {
+      setAudit([]);
     }
-  };
+  }
 
-  // ── Simulate inbound message (demo) ──────────────────────────────────────────
-
-  const DEMO_MESSAGES = [
-    { customer_name: "Farhan Ahmed", building: "Bldg C", text: "besan 1kg, namkeen 2 packet, bisleri 1L" },
-    { customer_name: "Priya Demo",   building: "Bldg D", text: "sunflower oil 1L, maida 1kg, dahi 400g" },
-    { customer_name: "Ravi Demo",    building: "Bldg A", text: "Maggi 6 packet, bread, butter" },
-  ];
-  const demoIdx = useRef(0);
-  const simulateMessage = async () => {
-    const msg = DEMO_MESSAGES[demoIdx.current % DEMO_MESSAGES.length];
-    demoIdx.current++;
-    const phone = `+9198${Math.floor(Math.random() * 90000000 + 10000000)}`;
+  async function setStatus(order: Order, status: OrderStatus) {
     try {
-      await api.ingest({ phone, ...msg });
-      toast.show(`New order parsed from ${msg.customer_name}!`);
-      await loadDashboard();
-    } catch (e) {
-      toast.show(`Ingest failed: ${e}`);
+      const updated = await api.setStatus(order.id, status);
+      setOrders((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      if (selected?.id === updated.id) setSelected(updated);
+      showToast(`Order #${order.id} moved to ${status.replace("_", " ")}`);
+      await refresh();
+    } catch (err) {
+      showToast(`Status update failed: ${err}`);
     }
-  };
+  }
 
-  // ── Derived data ──────────────────────────────────────────────────────────────
+  async function resolveReview(order: Order) {
+    const items = order.items.length
+      ? order.items.map((item) => ({ name: item.name, quantity: item.quantity, unit: item.unit, confidence: 1 }))
+      : [{ name: "Manual item", quantity: 1, unit: "pcs", confidence: 1 }];
+    try {
+      const updated = await api.resolveReview(order.id, items, "Reviewed by operator");
+      setOrders((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      setSelected(updated);
+      showToast(`Order #${order.id} resolved`);
+      await refresh();
+    } catch (err) {
+      showToast(`Review resolution failed: ${err}`);
+    }
+  }
 
-  const visibleOrders = s.orders.filter(o => {
-    const matchFilter = s.filter === "all" || o.status === s.filter;
-    const matchSearch = !s.search ||
-      o.customer.name.toLowerCase().includes(s.search.toLowerCase()) ||
-      o.items.some(i => i.name.toLowerCase().includes(s.search.toLowerCase()));
-    return matchFilter && matchSearch;
-  });
-
-  const ghostCustomers = s.customers.filter(c => c.dormant);
-  const udhaariCustomers = s.customers.filter(c => c.credit_balance > 0);
-
-  // ── Render ────────────────────────────────────────────────────────────────────
+  async function simulateOrder() {
+    const sample = { phone: `+9198${Math.floor(Math.random() * 90000000 + 10000000)}`, customer_name: "Pilot Customer", building: "Demo Block", text: "2 kg atta, 1 l oil, bread" };
+    try {
+      await api.ingest(sample);
+      showToast("Demo order ingested");
+      await refresh();
+    } catch (err) {
+      showToast(`Ingest failed: ${err}`);
+    }
+  }
 
   return (
     <>
-
-      {/* Nav */}
       <nav className="nav">
-        <div className="nav-logo">
-          <div className="nav-logo-dot" />
-          Kirana<span>OS</span>
-        </div>
+        <div className="nav-logo"><div className="nav-logo-dot" />Kirana<span>OS</span></div>
         <div className="nav-meta">
-          <span className="nav-store">Ramesh Kirana, Koramangala</span>
-          <div className="nav-avatar">RK</div>
+          <span className="nav-store">{store ? `${store.name} · ${store.slug}` : "Pilot workspace"}</span>
+          {tokenPresent ? <button className="order-btn" onClick={handleLogout}>Logout</button> : <span className="nav-store">Demo mode</span>}
+          <div className="nav-avatar">KO</div>
         </div>
       </nav>
 
       <div className="shell">
-        {/* Sidebar */}
         <aside className="sidebar">
-          <div className="sidebar-section-label">Orders</div>
-          {(["dashboard", "customers", "udhaari", "analytics"] as const).map(v => (
-            <button
-              key={v}
-              className={`sidebar-item${s.view === v ? " active" : ""}`}
-              onClick={() => dispatch({ type: "SET_VIEW", view: v })}
-            >
-              {SIDEBAR_ICONS[v]}
-              {SIDEBAR_LABELS[v]}
-              {v === "dashboard" && s.summary.pending > 0 &&
-                <span className="sidebar-badge">{s.summary.pending}</span>}
-              {v === "customers" && ghostCustomers.length > 0 &&
-                <span className="sidebar-badge red">{ghostCustomers.length}</span>}
+          <div className="sidebar-section-label">Pilot workflow</div>
+          {([
+            ["dashboard", "Orders"],
+            ["review", `Review Queue (${summary.needs_review})`],
+            ["customers", "Customers"],
+            ["closing", "Daily Closing"],
+          ] as const).map(([key, label]) => (
+            <button key={key} className={`sidebar-item${view === key ? " active" : ""}`} onClick={() => setView(key)}>
+              <span>•</span>{label}
             </button>
           ))}
-
           <hr className="sidebar-divider" />
-          <div className="sidebar-section-label">Demo</div>
-          <button className="sidebar-item" onClick={simulateMessage}>
-            {SIDEBAR_ICONS.simulate}
-            Simulate WA Message
-          </button>
-
-          <div className="sidebar-stats">
-            <div className="stat-row">
-              <span className="stat-label">Today's Revenue</span>
-              <span className="stat-value saffron">
-                ₹{(s.summary.delivered_today * 450).toLocaleString("en-IN")}
-              </span>
+          <div className="sidebar-section-label">Operator</div>
+          {!tokenPresent && (
+            <div className="login-box">
+              <input placeholder="username" value={login.username} onChange={(e) => setLogin({ ...login, username: e.target.value })} />
+              <input placeholder="password" type="password" value={login.password} onChange={(e) => setLogin({ ...login, password: e.target.value })} />
+              <button className="btn btn-saffron" onClick={handleLogin}>Login</button>
             </div>
-            <div className="stat-row">
-              <span className="stat-label">Delivered Today</span>
-              <span className="stat-value green">{s.summary.delivered_today}</span>
-            </div>
-            <div className="stat-row">
-              <span className="stat-label">Udhaari Owed</span>
-              <span className="stat-value" style={{ color: "var(--red)" }}>
-                ₹{s.summary.total_credit.toLocaleString("en-IN")}
-              </span>
-            </div>
-          </div>
+          )}
+          <button className="sidebar-item" onClick={simulateOrder}>+ Simulate WA order</button>
         </aside>
 
-        {/* Main */}
         <main className="main">
-          {s.error && (
-            <div className="error-banner">
-              ⚠ {s.error} — Is the backend running? (<code>make dev</code>)
-            </div>
-          )}
+          {error && <div className="error-banner">{error}</div>}
 
-          {/* ── Dashboard ─────────────────────────────────────────────────── */}
-          {s.view === "dashboard" && (
-            <div className="view-inner">
-              <div className="dashboard-header">
-                <div>
-                  <div className="dashboard-title">Order Dashboard</div>
-                  <div className="dashboard-subtitle">
-                    {new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" })}
-                  </div>
-                </div>
-                <button className="btn btn-saffron" onClick={simulateMessage}>+ Simulate Order</button>
-              </div>
-
-              {/* Stats strip */}
-              <div className="stats-strip">
-                {[
-                  { label: "Pending",      value: s.summary.pending,          color: "saffron" },
-                  { label: "Packing",      value: s.summary.packed,           color: "blue" },
-                  { label: "Delivered",    value: s.summary.delivered_today,  color: "green" },
-                  { label: "Needs Review", value: s.summary.needs_review,     color: "red" },
-                  { label: "Dormant",      value: s.summary.dormant_customers, color: "red" },
-                ].map(({ label, value, color }) => (
-                  <div key={label} className="stat-card">
-                    <div className="stat-card-label">{label}</div>
-                    <div className={`stat-card-value ${color}`}>{value}</div>
-                  </div>
+          {view === "dashboard" && (
+            <section className="view-inner">
+              <Header title="Order Dashboard" subtitle="Pilot-safe order lifecycle with review-first controls" action={<button className="btn btn-saffron" onClick={simulateOrder}>+ Simulate Order</button>} />
+              <Stats summary={summary} />
+              <div className="orders-toolbar">
+                {(["all", "needs_review", "pending", "packed", "delivered", "cancelled"] as const).map((item) => (
+                  <button key={item} className={`filter-tab${filter === item ? " active" : ""}`} onClick={() => setFilter(item)}>{item.replace("_", " ")}</button>
                 ))}
               </div>
-
-              {/* Dual panel */}
-              <div className="dual-panel">
-                {/* WA Inbox panel */}
-                <div className="inbox-panel">
-                  <div className="inbox-header">
-                    <div className="whatsapp-dot" />
-                    <div>
-                      <div className="inbox-header-title">WhatsApp Orders</div>
-                      <div className="inbox-header-sub">Live · auto-parsed</div>
-                    </div>
-                  </div>
-                  <div className="inbox-feed">
-                    {s.orders.slice(0, 12).map(o => (
-                      <div key={o.id} className={`wa-bubble${o.status === "needs_review" ? " review" : " parsed"}`}>
-                        <div className="wa-sender">{o.customer.name} ({o.customer.phone})</div>
-                        <div className="wa-text">
-                          {o.items.length > 0
-                            ? o.items.map(i => `${i.name} ${i.quantity}${i.unit}`).join(", ")
-                            : o.notes ?? "Media message"}
-                        </div>
-                        <div className="wa-meta">
-                          <span className="wa-time">
-                            {new Date(o.created_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
-                          </span>
-                          <span className={`wa-badge ${o.status === "needs_review" ? "parsing" : "parsed"}`}>
-                            {o.status === "needs_review" ? "⚠ Review" : "✓ Parsed"}
-                          </span>
-                        </div>
-                      </div>
-                    ))}
-                    {s.orders.length === 0 && !s.loading && (
-                      <div className="empty-feed">No messages yet. Click "Simulate WA Message" to begin.</div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Orders panel */}
-                <div className="orders-panel">
-                  <div className="orders-toolbar">
-                    <div className="filter-tabs">
-                      {(["all", "pending", "packed", "delivered", "needs_review"] as const).map(f => (
-                        <button
-                          key={f}
-                          className={`filter-tab${s.filter === f ? " active" : ""}`}
-                          onClick={() => dispatch({ type: "SET_FILTER", filter: f })}
-                        >
-                          {f.replace("_", " ")}
-                        </button>
-                      ))}
-                    </div>
-                    <input
-                      className="search-input"
-                      placeholder="Search customer or item…"
-                      value={s.search}
-                      onChange={e => dispatch({ type: "SET_SEARCH", search: e.target.value })}
-                    />
-                  </div>
-                  <div className="orders-list">
-                    {ghostCustomers.length > 0 && s.filter === "all" && (
-                      <div className="churn-banner">
-                        <span>👻</span>
-                        <span><strong>{ghostCustomers.length} customers</strong> silent for 14+ days</span>
-                        <button onClick={() => dispatch({ type: "SET_VIEW", view: "customers" })}>
-                          View →
-                        </button>
-                      </div>
-                    )}
-                    {visibleOrders.map(o => (
-                      <OrderCard key={o.id} order={o} onStatus={setStatus} />
-                    ))}
-                    {visibleOrders.length === 0 && !s.loading && (
-                      <div className="empty-orders">No orders in this lane.</div>
-                    )}
-                  </div>
-                </div>
+              <div className="orders-list">
+                {visibleOrders.map((order) => <OrderCard key={order.id} order={order} onOpen={loadAudit} onStatus={setStatus} onResolve={resolveReview} />)}
+                {visibleOrders.length === 0 && <div className="empty-orders">No orders in this lane.</div>}
               </div>
-            </div>
+            </section>
           )}
 
-          {/* ── Customers ─────────────────────────────────────────────────── */}
-          {s.view === "customers" && (
-            <div className="view-inner">
-              <div className="dashboard-header">
-                <div>
-                  <div className="dashboard-title">Customers</div>
-                  <div className="dashboard-subtitle">{s.customers.length} families · {ghostCustomers.length} at churn risk</div>
-                </div>
+          {view === "review" && (
+            <section className="view-inner">
+              <Header title="Review Queue" subtitle="Low-confidence and unparsed messages require operator confirmation before fulfillment" />
+              <div className="orders-list">
+                {reviewOrders.map((order) => <OrderCard key={order.id} order={order} onOpen={loadAudit} onStatus={setStatus} onResolve={resolveReview} />)}
+                {reviewOrders.length === 0 && <div className="empty-orders">No orders currently need review.</div>}
               </div>
-              {ghostCustomers.length > 0 && (
-                <div className="churn-banner" style={{ margin: "16px 24px 0" }}>
-                  <span>👻</span>
-                  <span><strong>{ghostCustomers.length} customers</strong> haven't ordered in 14+ days. They may be using Blinkit or Zepto.</span>
-                </div>
-              )}
+            </section>
+          )}
+
+          {view === "customers" && (
+            <section className="view-inner">
+              <Header title="Customers" subtitle={`${customers.length} customer records · ${summary.dormant_customers} dormant`} />
               <div className="table-wrapper">
                 <table className="customer-table">
-                  <thead>
-                    <tr>
-                      <th>Customer</th><th>Building</th><th>Last Order</th>
-                      <th>Udhaari</th><th>Status</th>
+                  <thead><tr><th>Customer</th><th>Building</th><th>Language</th><th>Udhaari</th><th>Last Order</th></tr></thead>
+                  <tbody>{customers.map((customer) => (
+                    <tr key={customer.id}>
+                      <td><div className="customer-name">{customer.name}</div><div className="customer-phone">{customer.phone}</div></td>
+                      <td>{customer.building ?? "—"}</td>
+                      <td>{customer.language_hint ?? "—"}</td>
+                      <td className={customer.credit_balance > 0 ? "credit-owed" : ""}>₹{customer.credit_balance.toFixed(0)}</td>
+                      <td>{customer.last_order_at ? new Date(customer.last_order_at).toLocaleDateString("en-IN") : "Never"}</td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {s.customers.map(c => {
-                      const daysSince = c.last_order_at
-                        ? Math.floor((Date.now() - new Date(c.last_order_at).getTime()) / 86400000)
-                        : null;
-                      const recencyClass = daysSince === null ? "danger"
-                        : daysSince === 0 ? "ok"
-                        : daysSince <= 7 ? "warn" : "danger";
-                      return (
-                        <tr key={c.id}>
-                          <td>
-                            <div className="customer-name">{c.name}</div>
-                            <div className="customer-phone">{c.phone}</div>
-                          </td>
-                          <td>{c.building ?? "—"}</td>
-                          <td className={`recency-${recencyClass}`}>
-                            {daysSince === null ? "Never" : daysSince === 0 ? "Today" : `${daysSince}d ago`}
-                          </td>
-                          <td className={c.credit_balance > 0 ? "credit-owed" : ""}>
-                            {c.credit_balance > 0 ? `₹${c.credit_balance.toFixed(0)}` : "—"}
-                          </td>
-                          <td>
-                            {c.dormant
-                              ? <span className="ghost-tag">👻 At Risk</span>
-                              : <span className="active-tag">● Active</span>}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
+                  ))}</tbody>
                 </table>
               </div>
-            </div>
+            </section>
           )}
 
-          {/* ── Udhaari ───────────────────────────────────────────────────── */}
-          {s.view === "udhaari" && (
-            <div className="view-inner">
-              <div className="dashboard-header">
-                <div>
-                  <div className="dashboard-title">Udhaari Ledger</div>
-                  <div className="dashboard-subtitle">Always tracked · never lost in a diary</div>
-                </div>
+          {view === "closing" && (
+            <section className="view-inner">
+              <Header title="Daily Closing" subtitle="Basic pilot summary for order and credit reconciliation" />
+              <div className="udhaari-summary-grid">
+                <ClosingCard label="Orders Created" value={closing?.orders_created ?? 0} />
+                <ClosingCard label="Delivered" value={closing?.delivered ?? 0} />
+                <ClosingCard label="Needs Review" value={closing?.needs_review ?? 0} />
+                <ClosingCard label="Amount Due" value={`₹${(closing?.amount_due_total ?? 0).toFixed(0)}`} />
+                <ClosingCard label="Credit Extended" value={`₹${(closing?.credit_extended_total ?? 0).toFixed(0)}`} />
               </div>
-              <div className="udhaari-content">
-                <div className="udhaari-summary-grid">
-                  <div className="udhaari-sum-card">
-                    <div className="udhaari-sum-label">Total Outstanding</div>
-                    <div className="udhaari-sum-value red">₹{s.summary.total_credit.toFixed(0)}</div>
-                  </div>
-                  <div className="udhaari-sum-card">
-                    <div className="udhaari-sum-label">Customers with Balance</div>
-                    <div className="udhaari-sum-value">{udhaariCustomers.length}</div>
-                  </div>
-                  <div className="udhaari-sum-card">
-                    <div className="udhaari-sum-label">Avg. per Customer</div>
-                    <div className="udhaari-sum-value">
-                      ₹{udhaariCustomers.length
-                        ? (s.summary.total_credit / udhaariCustomers.length).toFixed(0)
-                        : 0}
-                    </div>
-                  </div>
-                </div>
-                <div className="udhaari-list">
-                  {udhaariCustomers.length === 0 && (
-                    <div className="empty-orders" style={{ padding: 32 }}>No outstanding udhaari balances.</div>
-                  )}
-                  {udhaariCustomers.map(c => (
-                    <div key={c.id} className={`udhaari-row${c.credit_balance > 500 ? " overdue" : ""}`}>
-                      <div className="udhaari-avatar">{c.name[0]}</div>
-                      <div className="udhaari-info">
-                        <div className="udhaari-name">{c.name}</div>
-                        <div className="udhaari-building">{c.building ?? c.phone}</div>
-                      </div>
-                      <div className="udhaari-amount">₹{c.credit_balance.toFixed(0)}</div>
-                      <button
-                        className="settle-btn"
-                        onClick={() => settleCredit(c.id, c.credit_balance, c.name)}
-                      >
-                        Mark Paid
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
+            </section>
           )}
 
-          {/* ── Analytics ─────────────────────────────────────────────────── */}
-          {s.view === "analytics" && (
-            <div className="view-inner">
-              <div className="dashboard-header">
-                <div>
-                  <div className="dashboard-title">Analytics</div>
-                  <div className="dashboard-subtitle">Last 7 days · generated from real order data</div>
-                </div>
-              </div>
-              <div className="analytics-content">
-                <div className="analytics-grid">
-                  <BarChart
-                    title="Daily Orders"
-                    data={s.daily.map(d => ({ label: d.day.slice(5), value: d.orders }))}
-                    color="var(--ink)"
-                  />
-                  <BarChart
-                    title="Daily Revenue ₹"
-                    data={s.daily.map(d => ({ label: d.day.slice(5), value: d.revenue }))}
-                    color="var(--saffron)"
-                    format={v => `₹${(v / 1000).toFixed(1)}k`}
-                  />
-                </div>
-                <div className="analytics-grid">
-                  <RankList
-                    title="Top Items (30 days)"
-                    items={s.topItems.map(i => ({ name: i.name, value: i.count, sub: `${i.total_quantity} units` }))}
-                    color="var(--saffron)"
-                  />
-                  <RankList
-                    title="Order Input Method"
-                    items={s.inputStats.map(i => ({ name: i.message_type, value: i.count }))}
-                    color="var(--ink)"
-                  />
-                </div>
-              </div>
-            </div>
-          )}
+          {selected && <OrderDrawer order={selected} audit={audit} onClose={() => setSelected(null)} />}
         </main>
       </div>
-
-      {/* Toast */}
-      {toast.msg && <div className="toast">{toast.msg}</div>}
+      {toast && <div className="toast">{toast}</div>}
     </>
   );
 }
 
-// ── Sub-components ─────────────────────────────────────────────────────────────
+function Header({ title, subtitle, action }: { title: string; subtitle: string; action?: JSX.Element }) {
+  return <div className="dashboard-header"><div><div className="dashboard-title">{title}</div><div className="dashboard-subtitle">{subtitle}</div></div>{action}</div>;
+}
 
-function OrderCard({ order, onStatus }: { order: Order; onStatus: (id: number, s: OrderStatus) => void }) {
-  const time = new Date(order.created_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
-  const hasLowConfidence = order.items.some(i => i.confidence < 0.7);
+function Stats({ summary }: { summary: DashboardSummary }) {
+  const items = [
+    ["Pending", summary.pending, "saffron"],
+    ["Packed", summary.packed, "blue"],
+    ["Delivered Today", summary.delivered_today, "green"],
+    ["Needs Review", summary.needs_review, "red"],
+    ["Udhaari", `₹${summary.total_credit.toFixed(0)}`, "red"],
+  ] as const;
+  return <div className="stats-strip">{items.map(([label, value, color]) => <div className="stat-card" key={label}><div className="stat-card-label">{label}</div><div className={`stat-card-value ${color}`}>{value}</div></div>)}</div>;
+}
 
+function OrderCard({ order, onOpen, onStatus, onResolve }: { order: Order; onOpen: (order: Order) => void; onStatus: (order: Order, status: OrderStatus) => void; onResolve: (order: Order) => void }) {
+  const transitions = STATUS_FLOW[order.status];
   return (
     <div className={`order-card${order.status === "needs_review" ? " flagged" : ""}`}>
       <div className="order-card-header">
-        <div>
-          <div className="order-customer">{order.customer.name}</div>
-          <div className="order-building">{order.customer.building ?? "Building unknown"} · {time}</div>
-        </div>
+        <div><div className="order-customer">#{order.id} · {order.customer.name}</div><div className="order-building">{order.customer.phone} · {order.customer.building ?? "Building unknown"}</div></div>
         <span className={`status-pill ${order.status}`}>{order.status.replace("_", " ")}</span>
       </div>
-
       <div className="order-items">
-        {order.items.slice(0, 4).map(item => (
-          <span
-            key={item.id}
-            className={`item-tag${item.confidence < 0.7 ? " low-confidence" : ""}`}
-            title={item.confidence < 0.7 ? `Low confidence (${(item.confidence * 100).toFixed(0)}%)` : undefined}
-          >
-            {item.name} {item.quantity !== 1 ? `${item.quantity}${item.unit}` : ""}
-          </span>
-        ))}
-        {order.items.length > 4 && <span className="item-tag more">+{order.items.length - 4} more</span>}
-        {order.items.length === 0 && order.notes && (
-          <span className="item-tag needs-review-tag">{order.notes}</span>
-        )}
+        {order.items.map((item) => <span className={`item-tag${item.confidence < 0.7 ? " low-confidence" : ""}`} key={item.id}>{item.name} {item.quantity}{item.unit}</span>)}
+        {order.items.length === 0 && <span className="item-tag needs-review-tag">{order.notes ?? "Review raw message"}</span>}
       </div>
-
-      {hasLowConfidence && (
-        <div className="low-confidence-note">⚠ Some items parsed with low confidence — verify before packing</div>
-      )}
-
+      {order.message?.parse_failure_reason && <div className="low-confidence-note">Reason: {order.message.parse_failure_reason}</div>}
       <div className="order-footer">
-        {order.is_credit && <span className="udhaari-badge">Udhaari</span>}
-        {order.amount_due > 0 && <span className="order-amount">₹{order.amount_due.toFixed(0)}</span>}
-        <div className="order-actions">
-          {order.status === "pending"      && <button className="order-btn primary" onClick={() => onStatus(order.id, "packed")}>Pack</button>}
-          {order.status === "packed"       && <button className="order-btn green"   onClick={() => onStatus(order.id, "delivered")}>Deliver</button>}
-          {order.status === "needs_review" && <button className="order-btn primary" onClick={() => onStatus(order.id, "pending")}>Mark Pending</button>}
-          {order.status === "delivered"    && <span className="delivered-label">✓ Done</span>}
-        </div>
+        <button className="order-btn" onClick={() => onOpen(order)}>Inspect</button>
+        {order.status === "needs_review" && <button className="order-btn primary" onClick={() => onResolve(order)}>Resolve Review</button>}
+        {transitions.map((status) => <button className="order-btn" key={status} onClick={() => onStatus(order, status)}>{status.replace("_", " ")}</button>)}
       </div>
     </div>
   );
 }
 
-function BarChart({
-  title, data, color, format,
-}: {
-  title: string;
-  data: { label: string; value: number }[];
-  color: string;
-  format?: (v: number) => string;
-}) {
-  const max = Math.max(...data.map(d => d.value), 1);
+function ClosingCard({ label, value }: { label: string; value: string | number }) {
+  return <div className="udhaari-sum-card"><div className="udhaari-sum-label">{label}</div><div className="udhaari-sum-value">{value}</div></div>;
+}
+
+function OrderDrawer({ order, audit, onClose }: { order: Order; audit: AuditEvent[]; onClose: () => void }) {
   return (
-    <div className="chart-card">
-      <div className="chart-title">{title}</div>
-      <div className="bar-chart">
-        {data.map(d => (
-          <div key={d.label} className="bar-group">
-            <div className="bar-val">{format ? format(d.value) : d.value}</div>
-            <div className="bar" style={{ height: `${(d.value / max) * 80}px`, background: color }} />
-            <div className="bar-label">{d.label}</div>
-          </div>
-        ))}
-        {data.length === 0 && <div className="empty-orders">No data yet.</div>}
-      </div>
-    </div>
+    <aside className="drawer">
+      <button className="drawer-close" onClick={onClose}>×</button>
+      <h2>Order #{order.id}</h2>
+      <p className="dashboard-subtitle">Raw: {order.message?.raw_text ?? "—"}</p>
+      <p className="dashboard-subtitle">Extracted: {order.message?.extracted_text ?? "—"}</p>
+      <p className="dashboard-subtitle">Notes: {order.notes ?? "—"}</p>
+      <h3>Items</h3>
+      {order.items.map((item) => <div className="drawer-row" key={item.id}>{item.name} · {item.quantity}{item.unit} · {(item.confidence * 100).toFixed(0)}%</div>)}
+      <h3>Audit trail</h3>
+      {audit.map((event) => <div className="drawer-row" key={event.id}><strong>{event.action}</strong><br />{new Date(event.created_at).toLocaleString("en-IN")}<br />{event.evidence}</div>)}
+      {audit.length === 0 && <div className="drawer-row">No audit events yet.</div>}
+    </aside>
   );
 }
 
-function RankList({
-  title, items, color,
-}: {
-  title: string;
-  items: { name: string; value: number; sub?: string }[];
-  color: string;
-}) {
-  const max = Math.max(...items.map(i => i.value), 1);
-  return (
-    <div className="chart-card">
-      <div className="chart-title">{title}</div>
-      <div className="rank-list">
-        {items.map((item, idx) => (
-          <div key={item.name} className="rank-row">
-            <span className="rank-num">{idx + 1}</span>
-            <span className="rank-name">{item.name}{item.sub ? ` (${item.sub})` : ""}</span>
-            <div className="rank-bar-wrap">
-              <div className="rank-bar" style={{ width: `${(item.value / max) * 100}%`, background: color }} />
-            </div>
-            <span className="rank-val">{item.value}</span>
-          </div>
-        ))}
-        {items.length === 0 && <div className="empty-orders">No data yet.</div>}
-      </div>
-    </div>
-  );
-}
+export default App;

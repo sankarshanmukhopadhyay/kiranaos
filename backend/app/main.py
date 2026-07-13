@@ -9,6 +9,8 @@ from app.db.session import Base, SessionLocal, engine
 from app.services.auth import ensure_default_store
 from app.services.security import assert_secure_runtime_config, cors_origins
 
+logger = logging.getLogger(__name__)
+
 
 def create_app() -> FastAPI:
     settings = get_settings()
@@ -26,7 +28,7 @@ def create_app() -> FastAPI:
 
     app = FastAPI(
         title="KiranaOS API",
-        version="2.2.0",
+        version=settings.app_version,
         description=(
             "WhatsApp-native order management for kirana stores. "
             "Converts inbound messages into structured orders. "
@@ -40,6 +42,12 @@ def create_app() -> FastAPI:
         allow_credentials=(settings.frontend_origin != "*"),
         allow_methods=["*"],
         allow_headers=["*"],
+    )
+
+    logger.info(
+        "KiranaOS %s starting: auth_required=%s demo_mode=%s stt=%s ocr=%s parser_ai=%s",
+        settings.app_version, settings.auth_required, settings.demo_mode,
+        settings.stt_provider, settings.ocr_provider, settings.parser_ai_provider,
     )
 
     app.include_router(router, prefix="/api")

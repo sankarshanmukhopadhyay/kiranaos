@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from app.core.config import get_settings
 from app.models.domain import (
     AuditAction,
     Customer,
@@ -25,7 +26,6 @@ from app.schemas.domain import (
     OutboundConfirmationIn,
     UpiWebhookIn,
 )
-from app.core.config import get_settings
 from app.services.adapters import send_meta_whatsapp, send_twilio_whatsapp
 from app.services.audit import record_audit_event
 
@@ -246,8 +246,12 @@ def optimize_route(
         if row.order.customer.latitude is not None and row.order.customer.longitude is not None
     ]
     if geocoded and len(geocoded) == len(assignments):
-        current_lat = start_latitude if start_latitude is not None else geocoded[0].order.customer.latitude
-        current_lon = start_longitude if start_longitude is not None else geocoded[0].order.customer.longitude
+        first_lat = geocoded[0].order.customer.latitude
+        first_lon = geocoded[0].order.customer.longitude
+        assert first_lat is not None
+        assert first_lon is not None
+        current_lat = float(start_latitude if start_latitude is not None else first_lat)
+        current_lon = float(start_longitude if start_longitude is not None else first_lon)
         remaining = geocoded[:]
         ordered: list[DeliveryAssignment] = []
         while remaining:
@@ -256,14 +260,14 @@ def optimize_route(
                 key=lambda row: _distance(
                     current_lat,
                     current_lon,
-                    row.order.customer.latitude or current_lat,
-                    row.order.customer.longitude or current_lon,
+                    float(row.order.customer.latitude if row.order.customer.latitude is not None else current_lat),
+                    float(row.order.customer.longitude if row.order.customer.longitude is not None else current_lon),
                 ),
             )
             ordered.append(next_stop)
             remaining.remove(next_stop)
-            current_lat = next_stop.order.customer.latitude or current_lat
-            current_lon = next_stop.order.customer.longitude or current_lon
+            current_lat = float(next_stop.order.customer.latitude if next_stop.order.customer.latitude is not None else current_lat)
+            current_lon = float(next_stop.order.customer.longitude if next_stop.order.customer.longitude is not None else current_lon)
         strategy = "nearest_neighbor_geocoded"
     else:
         ordered = sorted(
