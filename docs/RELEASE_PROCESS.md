@@ -1,3 +1,9 @@
+---
+layout: page
+title: Release Process
+permalink: /release-process/
+---
+
 # Release Process
 
 ## Pre-release checks

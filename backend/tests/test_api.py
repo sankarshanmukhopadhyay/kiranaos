@@ -496,3 +496,149 @@ def test_daily_closing_returns_pilot_summary():
     body = closing.json()
     assert body["orders_created"] >= 1
     assert "amount_due_total" in body
+
+# ── Release 2 Operations Release ─────────────────────────────────────────────
+
+def test_feature_flags_expose_operations_capabilities():
+    res = client.get("/api/features")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["catalog_enabled"] is True
+    assert body["staff_assignment_enabled"] is True
+    assert body["repeat_orders_enabled"] is True
+    assert body["ai_usage_tracking_enabled"] is True
+
+
+def test_catalog_product_crud_and_substitution_are_audited():
+    primary = client.post("/api/catalog/products", json={
+        "sku": "ATTA-5KG",
+        "name": "Atta 5kg",
+        "category": "staples",
+        "unit": "bag",
+        "price": 260,
+        "stock_quantity": 12,
+    })
+    assert primary.status_code == 201
+    product_id = primary.json()["id"]
+
+    substitute = client.post("/api/catalog/products", json={
+        "sku": "ATTA-10KG",
+        "name": "Atta 10kg",
+        "category": "staples",
+        "unit": "bag",
+        "price": 510,
+    })
+    assert substitute.status_code == 201
+
+    updated = client.patch(f"/api/catalog/products/{product_id}", json={"stock_quantity": 9, "notes": "Fast moving item"})
+    assert updated.status_code == 200
+    assert updated.json()["stock_quantity"] == pytest.approx(9)
+
+    sub = client.post(
+        f"/api/catalog/products/{product_id}/substitutions",
+        json={"substitute_product_id": substitute.json()["id"], "reason": "larger pack available"},
+    )
+    assert sub.status_code == 201
+
+    events = client.get(f"/api/audit/events?entity_type=product&entity_id={product_id}")
+    actions = [event["action"] for event in events.json()]
+    assert "product_created" in actions
+    assert "product_updated" in actions
+    assert "product_substitution_added" in actions
+
+
+def test_order_item_correction_can_bind_catalog_product_and_notes():
+    product = client.post("/api/catalog/products", json={"sku": "OIL-1L", "name": "Sunflower Oil 1L", "unit": "bottle"})
+    order = client.post("/api/ingest/messages", json={"phone": "+919999990090", "text": "oil"})
+    order_id = order.json()["id"]
+
+    corrected = client.patch(f"/api/orders/{order_id}/items", json={
+        "items": [{
+            "name": "Sunflower Oil 1L",
+            "quantity": 1,
+            "unit": "bottle",
+            "confidence": 1,
+            "product_id": product.json()["id"],
+            "notes": "Catalog matched by operator",
+        }],
+        "notes": "Ready to pack",
+    })
+    assert corrected.status_code == 200
+    assert corrected.json()["items"][0]["product_id"] == product.json()["id"]
+    assert corrected.json()["items"][0]["notes"] == "Catalog matched by operator"
+
+
+def test_repeat_order_and_customer_history_support_daily_workflow():
+    original = client.post("/api/ingest/messages", json={"phone": "+919999990091", "customer_name": "Repeat Buyer", "text": "bread, milk"})
+    order_id = original.json()["id"]
+    customer_id = original.json()["customer"]["id"]
+
+    repeated = client.post(f"/api/orders/{order_id}/repeat", json={"notes": "Customer asked for same order again"})
+    assert repeated.status_code == 201
+    assert repeated.json()["customer"]["id"] == customer_id
+    assert [item["name"] for item in repeated.json()["items"]] == [item["name"] for item in original.json()["items"]]
+
+    history = client.get(f"/api/customers/{customer_id}/history")
+    assert history.status_code == 200
+    assert history.json()["lifetime_orders"] >= 2
+    assert len(history.json()["recent_orders"]) >= 2
+
+
+def test_staff_assignment_lifecycle_is_audited():
+    operator = client.post("/api/operators", json={"username": "packer", "password": "supersecret", "role": "staff"})
+    assert operator.status_code == 201
+    order = client.post("/api/ingest/messages", json={"phone": "+919999990092", "text": "rice 5kg"})
+    order_id = order.json()["id"]
+
+    assignment = client.post(f"/api/orders/{order_id}/staff-assignments", json={
+        "operator_id": operator.json()["id"],
+        "role": "packing",
+        "notes": "Pack before 6pm",
+    })
+    assert assignment.status_code == 201
+    assignment_id = assignment.json()["id"]
+
+    updated = client.patch(f"/api/staff-assignments/{assignment_id}", json={"status": "completed", "notes": "Packed"})
+    assert updated.status_code == 200
+    assert updated.json()["status"] == "completed"
+
+    listed = client.get(f"/api/staff-assignments?order_id={order_id}")
+    assert listed.status_code == 200
+    assert listed.json()[0]["id"] == assignment_id
+
+    events = client.get(f"/api/audit/events?entity_type=order&entity_id={order_id}")
+    actions = [event["action"] for event in events.json()]
+    assert "staff_assignment_created" in actions
+    assert "staff_assignment_updated" in actions
+
+
+def test_order_notes_ai_usage_and_operations_daily_report():
+    order = client.post("/api/ingest/messages", json={"phone": "+919999990093", "text": "tea, sugar"})
+    order_id = order.json()["id"]
+
+    notes = client.patch(f"/api/orders/{order_id}/notes", json={"notes": "Customer prefers evening delivery"})
+    assert notes.status_code == 200
+    assert notes.json()["notes"] == "Customer prefers evening delivery"
+
+    usage = client.post("/api/operations/ai-usage", json={
+        "provider": "openai",
+        "model": "gpt-4o-mini",
+        "purpose": "parse",
+        "order_id": order_id,
+        "estimated_units": 42,
+        "estimated_cost": 0.002,
+        "success": True,
+    })
+    assert usage.status_code == 201
+
+    summary = client.get("/api/operations/ai-usage/summary")
+    assert summary.status_code == 200
+    assert summary.json()["total_events"] >= 1
+    assert summary.json()["by_provider"]["openai"] >= 1
+
+    report = client.get("/api/operations/daily-report")
+    assert report.status_code == 200
+    body = report.json()
+    assert body["orders_created"] >= 1
+    assert "average_order_value" in body
+    assert body["ai_usage_count"] >= 1

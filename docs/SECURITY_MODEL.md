@@ -1,3 +1,9 @@
+---
+layout: page
+title: Security Model
+permalink: /security-model/
+---
+
 # Security Model
 
 ## Trust Boundaries

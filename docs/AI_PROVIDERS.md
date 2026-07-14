@@ -1,3 +1,9 @@
+---
+layout: page
+title: AI Providers
+permalink: /ai-providers/
+---
+
 # AI Providers
 
 KiranaOS's order-ingestion pipeline has three optional AI-assisted

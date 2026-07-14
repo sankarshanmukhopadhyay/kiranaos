@@ -8,7 +8,7 @@ The seed is idempotent: re-running it skips customers that already exist.
 import asyncio
 
 from app.db.session import Base, SessionLocal, engine
-from app.models.domain import MessageType
+from app.models.domain import MessageType, Product
 from app.schemas.domain import CreditAdjustIn, IngestMessageIn
 from app.services.ingestion import adjust_credit, ingest_message
 
@@ -77,6 +77,13 @@ UDHAARI_SEED = {
     "+919801010101": 970.0,
 }
 
+PRODUCT_SEED = [
+    {"sku": "ATTA-5KG", "name": "Atta 5kg", "canonical_name": "Atta", "category": "staples", "unit": "bag", "price": 260.0, "stock_quantity": 12.0},
+    {"sku": "RICE-10KG", "name": "Rice 10kg", "canonical_name": "Rice", "category": "staples", "unit": "bag", "price": 640.0, "stock_quantity": 8.0},
+    {"sku": "OIL-1L", "name": "Sunflower Oil 1L", "canonical_name": "Oil", "category": "edible-oil", "unit": "bottle", "price": 145.0, "stock_quantity": 24.0},
+    {"sku": "BREAD", "name": "Bread", "canonical_name": "Bread", "category": "bakery", "unit": "pcs", "price": 45.0, "stock_quantity": 20.0},
+]
+
 
 async def run():
     Base.metadata.create_all(bind=engine)
@@ -85,6 +92,12 @@ async def run():
         from sqlalchemy import select
 
         from app.models.domain import Customer
+
+        for product_data in PRODUCT_SEED:
+            existing_product = db.scalar(select(Product).where(Product.sku == product_data["sku"]))
+            if not existing_product:
+                db.add(Product(store_id=1, **product_data))
+        db.commit()
 
         for payload in SAMPLE_ORDERS:
             existing = db.scalar(select(Customer).where(Customer.phone == payload.phone))
@@ -103,7 +116,7 @@ async def run():
                 ))
                 print(f"  Udhaari ₹{amount} set for {customer.name}")
 
-        print(f"\nSeed complete. {len(SAMPLE_ORDERS)} orders, {len(UDHAARI_SEED)} udhaari balances.")
+        print(f"\nSeed complete. {len(SAMPLE_ORDERS)} orders, {len(UDHAARI_SEED)} udhaari balances, {len(PRODUCT_SEED)} products.")
     finally:
         db.close()
 

@@ -1,3 +1,9 @@
+---
+layout: page
+title: Pilot Readiness Checklist
+permalink: /pilot-readiness/
+---
+
 # Pilot Readiness Checklist
 
 Use this checklist before running KiranaOS with real merchant data.

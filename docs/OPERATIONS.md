@@ -1,3 +1,9 @@
+---
+layout: page
+title: Operations Guide
+permalink: /operations/
+---
+
 # Operations Guide
 
 ## Daily Flow
@@ -31,3 +37,26 @@ KiranaOS records operational evidence for customer messages, parsed orders, orde
 ## Backup And Recovery
 
 For production Postgres deployments, use managed database backups and verify restores periodically. For local SQLite demo mode, treat `backend/data/` as disposable.
+
+## Release 2 operations workflow
+
+Release 2 expands the daily operating loop from review-only pilots to store workflow pilots.
+
+### Daily loop
+
+1. Review new orders.
+2. Correct ambiguous items.
+3. Link corrected items to catalog products where useful.
+4. Record substitutions explicitly.
+5. Assign fulfillment work to staff.
+6. Create repeat orders for returning customers.
+7. Review the daily operations report.
+8. Inspect AI usage as a cost and reliability signal.
+
+### Operational controls
+
+- Product changes are audited.
+- Substitution choices are explicit records.
+- Repeat orders create new orders and audit events.
+- Staff assignments are lifecycle-managed.
+- AI usage is observable, but not used as a billing system in this release.

@@ -6,7 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     app_name:               str  = "KiranaOS"
-    app_version:            str  = "2.3.0"
+    app_version:            str  = "2.4.0"
     database_url:           str  = "sqlite:///./data/kiranaos.db"
     default_store_id:        int  = 1
     whatsapp_verify_token:  str  = "change-me-before-deploy"
@@ -22,6 +22,12 @@ class Settings(BaseSettings):
     provider_retry_attempts: int = 1
     parse_confidence_threshold: float = 0.70
     ai_order_quota_per_day: int = 500
+    catalog_enabled: bool = True
+    staff_assignment_enabled: bool = True
+    repeat_orders_enabled: bool = True
+    ai_usage_tracking_enabled: bool = True
+    payments_enabled: bool = True
+    delivery_enabled: bool = True
     upi_webhook_secret:     str | None = None
     webhook_timestamp_tolerance_seconds: int = 300
     demo_mode:              bool = True

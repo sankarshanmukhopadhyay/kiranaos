@@ -3,11 +3,14 @@ Pydantic v2 schemas — request/response contracts for every API endpoint.
 Kept separate from SQLAlchemy models so the API surface can evolve independently.
 """
 
+from __future__ import annotations
+
 from datetime import datetime
 
 from pydantic import BaseModel, Field, field_validator
 
 from app.models.domain import (
+    AiUsagePurpose,
     AuditAction,
     DeliveryStatus,
     MessageType,
@@ -16,6 +19,8 @@ from app.models.domain import (
     OutboundStatus,
     ParseStatus,
     PaymentStatus,
+    ProductStatus,
+    StaffAssignmentStatus,
 )
 
 # ── Shared ─────────────────────────────────────────────────────────────────────
@@ -26,10 +31,70 @@ class OrderItemOut(BaseModel):
     quantity:   float
     unit:       str
     confidence: float   # 0–1; shown in UI to flag low-confidence parses
+    product_id: int | None = None
+    substitution_for_item_id: int | None = None
+    notes: str | None = None
 
     model_config = {"from_attributes": True}
 
 
+class ProductOut(BaseModel):
+    id: int
+    store_id: int
+    sku: str
+    name: str
+    canonical_name: str
+    category: str | None
+    unit: str
+    price: float | None
+    stock_quantity: float | None
+    status: ProductStatus
+    notes: str | None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ProductCreateIn(BaseModel):
+    sku: str = Field(..., min_length=1, max_length=80)
+    name: str = Field(..., min_length=1, max_length=160)
+    canonical_name: str | None = Field(default=None, max_length=160)
+    category: str | None = Field(default=None, max_length=80)
+    unit: str = Field(default="pcs", min_length=1, max_length=32)
+    price: float | None = Field(default=None, ge=0)
+    stock_quantity: float | None = Field(default=None, ge=0)
+    status: ProductStatus = ProductStatus.active
+    notes: str | None = Field(default=None, max_length=500)
+
+
+class ProductUpdateIn(BaseModel):
+    sku: str | None = Field(default=None, min_length=1, max_length=80)
+    name: str | None = Field(default=None, min_length=1, max_length=160)
+    canonical_name: str | None = Field(default=None, max_length=160)
+    category: str | None = Field(default=None, max_length=80)
+    unit: str | None = Field(default=None, min_length=1, max_length=32)
+    price: float | None = Field(default=None, ge=0)
+    stock_quantity: float | None = Field(default=None, ge=0)
+    status: ProductStatus | None = None
+    notes: str | None = Field(default=None, max_length=500)
+
+
+class ProductSubstitutionIn(BaseModel):
+    substitute_product_id: int
+    reason: str | None = Field(default=None, max_length=160)
+
+
+class ProductSubstitutionOut(BaseModel):
+    id: int
+    store_id: int
+    product_id: int
+    substitute_product_id: int
+    reason: str | None
+    created_at: datetime
+    substitute: ProductOut | None = None
+
+    model_config = {"from_attributes": True}
 
 
 class InboundMessageOut(BaseModel):
@@ -77,6 +142,14 @@ class OrderOut(BaseModel):
     message:      InboundMessageOut | None = None
 
     model_config = {"from_attributes": True}
+
+
+class CustomerHistoryOut(BaseModel):
+    customer: CustomerOut
+    recent_orders: list[OrderOut]
+    lifetime_orders: int
+    lifetime_amount_due: float
+    top_items: list[TopItem] = Field(default_factory=list)
 
 
 class StoreOut(BaseModel):
@@ -165,6 +238,9 @@ class OrderItemCorrectionIn(BaseModel):
     quantity: float = Field(default=1.0, gt=0)
     unit: str = Field(default="pcs", min_length=1, max_length=32)
     confidence: float = Field(default=1.0, ge=0, le=1)
+    product_id: int | None = None
+    substitution_for_item_id: int | None = None
+    notes: str | None = Field(default=None, max_length=300)
 
 
 class OrderReviewResolveIn(BaseModel):
@@ -181,6 +257,40 @@ class OrderCorrectionIn(BaseModel):
 class AmountUpdateIn(BaseModel):
     amount_due: float = Field(..., ge=0)
     is_credit:  bool  = False
+
+
+class OrderNotesUpdateIn(BaseModel):
+    notes: str | None = Field(default=None, max_length=1000)
+
+
+class RepeatOrderIn(BaseModel):
+    notes: str | None = Field(default=None, max_length=500)
+    status: OrderStatus = OrderStatus.pending
+
+
+class StaffAssignmentIn(BaseModel):
+    operator_id: int
+    role: str = Field(default="fulfillment", max_length=40)
+    notes: str | None = Field(default=None, max_length=500)
+
+
+class StaffAssignmentUpdateIn(BaseModel):
+    status: StaffAssignmentStatus | None = None
+    notes: str | None = Field(default=None, max_length=500)
+
+
+class StaffAssignmentOut(BaseModel):
+    id: int
+    store_id: int
+    order_id: int
+    operator_id: int
+    role: str
+    status: StaffAssignmentStatus
+    notes: str | None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
 
 
 # ── Customer mutations ─────────────────────────────────────────────────────────
@@ -239,6 +349,36 @@ class DailyClosingOut(BaseModel):
     needs_review: int
     amount_due_total: float
     credit_extended_total: float
+    pending_end_of_day: int = 0
+    packed_end_of_day: int = 0
+    manual_intervention_rate: float = 0.0
+
+
+class OperationsDailyReportOut(BaseModel):
+    store_id: int
+    day: str
+    orders_created: int
+    orders_delivered: int
+    orders_cancelled: int
+    needs_review: int
+    pending: int
+    packed: int
+    amount_due_total: float
+    credit_extended_total: float
+    average_order_value: float
+    manual_intervention_rate: float
+    top_items: list[TopItem]
+    ai_usage_count: int
+    ai_estimated_cost: float
+
+
+class FeatureFlagsOut(BaseModel):
+    catalog_enabled: bool
+    staff_assignment_enabled: bool
+    repeat_orders_enabled: bool
+    ai_usage_tracking_enabled: bool
+    payments_enabled: bool
+    delivery_enabled: bool
 
 
 
@@ -388,6 +528,45 @@ class TopItem(BaseModel):
 class InputMethodStat(BaseModel):
     message_type: str
     count:        int
+
+
+class AiUsageEventCreateIn(BaseModel):
+    provider: str = Field(..., min_length=1, max_length=40)
+    model: str | None = Field(default=None, max_length=120)
+    purpose: AiUsagePurpose
+    inbound_message_id: int | None = None
+    order_id: int | None = None
+    estimated_units: float = Field(default=0.0, ge=0)
+    estimated_cost: float = Field(default=0.0, ge=0)
+    success: bool = True
+    failure_reason: str | None = Field(default=None, max_length=160)
+
+
+class AiUsageEventOut(BaseModel):
+    id: int
+    store_id: int
+    provider: str
+    model: str | None
+    purpose: AiUsagePurpose
+    inbound_message_id: int | None
+    order_id: int | None
+    estimated_units: float
+    estimated_cost: float
+    success: bool
+    failure_reason: str | None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class AiUsageSummaryOut(BaseModel):
+    store_id: int
+    day: str | None = None
+    total_events: int
+    total_estimated_units: float
+    total_estimated_cost: float
+    by_provider: dict[str, int]
+    by_purpose: dict[str, int]
 
 
 class AuditEventOut(BaseModel):

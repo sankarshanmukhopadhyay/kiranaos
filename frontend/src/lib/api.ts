@@ -28,6 +28,9 @@ export interface OrderItem {
   quantity:   number;
   unit:       string;
   confidence: number;  // 0–1; used to highlight uncertain parses
+  product_id: number | null;
+  substitution_for_item_id: number | null;
+  notes: string | null;
 }
 
 export interface Customer {
@@ -214,6 +217,71 @@ export interface Payment {
   reconciled_at: string | null;
 }
 
+export interface Product {
+  id: number;
+  store_id: number;
+  sku: string;
+  name: string;
+  canonical_name: string;
+  category: string | null;
+  unit: string;
+  price: number | null;
+  stock_quantity: number | null;
+  status: "active" | "inactive";
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface StaffAssignment {
+  id: number;
+  store_id: number;
+  order_id: number;
+  operator_id: number;
+  role: string;
+  status: "assigned" | "accepted" | "completed" | "reassigned" | "cancelled";
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OperationsDailyReport {
+  store_id: number;
+  day: string;
+  orders_created: number;
+  orders_delivered: number;
+  orders_cancelled: number;
+  needs_review: number;
+  pending: number;
+  packed: number;
+  amount_due_total: number;
+  credit_extended_total: number;
+  average_order_value: number;
+  manual_intervention_rate: number;
+  top_items: TopItem[];
+  ai_usage_count: number;
+  ai_estimated_cost: number;
+}
+
+export interface FeatureFlags {
+  catalog_enabled: boolean;
+  staff_assignment_enabled: boolean;
+  repeat_orders_enabled: boolean;
+  ai_usage_tracking_enabled: boolean;
+  payments_enabled: boolean;
+  delivery_enabled: boolean;
+}
+
+export interface AiUsageSummary {
+  store_id: number;
+  day: string | null;
+  total_events: number;
+  total_estimated_units: number;
+  total_estimated_cost: number;
+  by_provider: Record<string, number>;
+  by_purpose: Record<string, number>;
+}
+
 // ── HTTP helper ────────────────────────────────────────────────────────────────
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
@@ -242,6 +310,7 @@ export const api = {
   },
   logout: () => setAuthToken(null),
   currentStore: () => req<Store>("/api/stores/current"),
+  features: () => req<FeatureFlags>("/api/features"),
   createOperator: (data: { username: string; password: string; role?: Operator["role"]; store_id?: number }) =>
     req<Operator>("/api/operators", { method: "POST", body: JSON.stringify(data) }),
 
@@ -269,6 +338,18 @@ export const api = {
     req<Order>(`/api/orders/${id}/review/resolve`, { method: "POST", body: JSON.stringify({ items, notes, status: "pending" }) }),
   confirmOrder: (id: number, body?: string) =>
     req<OutboundMessage>(`/api/orders/${id}/confirmations`, { method: "POST", body: JSON.stringify({ body }) }),
+  updateOrderNotes: (id: number, notes: string | null) =>
+    req<Order>(`/api/orders/${id}/notes`, { method: "PATCH", body: JSON.stringify({ notes }) }),
+  repeatOrder: (id: number, notes?: string) =>
+    req<Order>(`/api/orders/${id}/repeat`, { method: "POST", body: JSON.stringify({ notes }) }),
+  assignStaff: (order_id: number, operator_id: number, role = "fulfillment", notes?: string) =>
+    req<StaffAssignment>(`/api/orders/${order_id}/staff-assignments`, { method: "POST", body: JSON.stringify({ operator_id, role, notes }) }),
+  staffAssignments: (params?: { order_id?: number; operator_id?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.order_id) qs.set("order_id", String(params.order_id));
+    if (params?.operator_id) qs.set("operator_id", String(params.operator_id));
+    return req<StaffAssignment[]>(`/api/staff-assignments?${qs}`);
+  },
 
   // Customers
   customers: (dormant_only = false) =>
@@ -284,6 +365,19 @@ export const api = {
     }),
   ledger: (customer_id: number) =>
     req<LedgerEntry[]>(`/api/customers/${customer_id}/ledger`),
+  customerHistory: (customer_id: number) =>
+    req<{ customer: Customer; recent_orders: Order[]; lifetime_orders: number; lifetime_amount_due: number; top_items: TopItem[] }>(`/api/customers/${customer_id}/history`),
+
+  // Catalog
+  products: (q?: string) => {
+    const qs = new URLSearchParams();
+    if (q) qs.set("q", q);
+    return req<Product[]>(`/api/catalog/products?${qs}`);
+  },
+  createProduct: (data: Partial<Product> & { sku: string; name: string }) =>
+    req<Product>("/api/catalog/products", { method: "POST", body: JSON.stringify(data) }),
+  updateProduct: (id: number, data: Partial<Product>) =>
+    req<Product>(`/api/catalog/products/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
 
   // Delivery
   createDeliveryAgent: (data: { name: string; phone: string; active?: boolean }) =>
@@ -316,6 +410,10 @@ export const api = {
     phone: string; customer_name?: string; building?: string;
     message_type?: MessageType; text?: string;
   }) => req<Order>("/api/ingest/messages", { method: "POST", body: JSON.stringify(payload) }),
+
+  // Operations
+  operationsDailyReport: () => req<OperationsDailyReport>("/api/operations/daily-report"),
+  aiUsageSummary: () => req<AiUsageSummary>("/api/operations/ai-usage/summary"),
 
   // Analytics
   daily: (days = 7) =>

@@ -17,24 +17,39 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.core.config import get_settings
 from app.models.domain import (
+    AiUsageEvent,
     AuditAction,
     Customer,
     InboundMessage,
     LedgerEntry,
     MessageType,
+    Operator,
     Order,
     OrderItem,
     OrderStatus,
     ParseStatus,
+    Product,
+    ProductStatus,
+    ProductSubstitution,
+    StaffAssignment,
 )
 from app.schemas.domain import (
+    AiUsageEventCreateIn,
     AmountUpdateIn,
     CreditAdjustIn,
     CustomerCreateIn,
+    CustomerOut,
     CustomerUpdateIn,
     IngestMessageIn,
     OrderCorrectionIn,
+    OrderNotesUpdateIn,
     OrderReviewResolveIn,
+    ProductCreateIn,
+    ProductSubstitutionIn,
+    ProductUpdateIn,
+    RepeatOrderIn,
+    StaffAssignmentIn,
+    StaffAssignmentUpdateIn,
 )
 from app.services.adapters import extract_items_with_ai
 from app.services.audit import record_audit_event
@@ -414,6 +429,9 @@ def correct_order_items(db: Session, order_id: int, data: OrderCorrectionIn, sto
             quantity=correction_item.quantity,
             unit=correction_item.unit,
             confidence=correction_item.confidence,
+            product_id=correction_item.product_id,
+            substitution_for_item_id=correction_item.substitution_for_item_id,
+            notes=correction_item.notes,
         ))
     if data.notes is not None:
         order.notes = data.notes
@@ -574,6 +592,9 @@ def daily_closing(db: Session, store_id: int, day: str | None = None) -> dict:
         "needs_review": sum(1 for o in rows if o.status == OrderStatus.needs_review),
         "amount_due_total": float(sum(o.amount_due for o in rows)),
         "credit_extended_total": float(sum(o.amount_due for o in rows if o.is_credit)),
+        "pending_end_of_day": sum(1 for o in rows if o.status == OrderStatus.pending),
+        "packed_end_of_day": sum(1 for o in rows if o.status == OrderStatus.packed),
+        "manual_intervention_rate": float(sum(1 for o in rows if o.status == OrderStatus.needs_review) / len(rows)) if rows else 0.0,
     }
 
 
@@ -639,3 +660,262 @@ def input_method_stats(db: Session, days: int = 30, store_id: int | None = None)
         input_stmt = input_stmt.where(InboundMessage.store_id == store_id)
     rows = db.execute(input_stmt).all()
     return [{"message_type": str(r.message_type), "count": r.count} for r in rows]
+
+
+# ── Release 2: catalog and operations workflow ───────────────────────────────
+
+def list_products(
+    db: Session,
+    *,
+    store_id: int,
+    status: ProductStatus | None = None,
+    q: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> list[Product]:
+    stmt = select(Product).where(Product.store_id == store_id).order_by(Product.name).limit(limit).offset(offset)
+    if status:
+        stmt = stmt.where(Product.status == status)
+    if q:
+        needle = f"%{q.lower()}%"
+        stmt = stmt.where(func.lower(Product.name).like(needle) | func.lower(Product.sku).like(needle) | func.lower(Product.canonical_name).like(needle))
+    return list(db.scalars(stmt).all())
+
+
+def get_product(db: Session, product_id: int, *, store_id: int) -> Product:
+    product = db.scalar(select(Product).where(Product.id == product_id, Product.store_id == store_id))
+    if not product:
+        raise ValueError(f"Product {product_id} not found")
+    return product
+
+
+def create_product(db: Session, data: ProductCreateIn, *, store_id: int) -> Product:
+    existing = db.scalar(select(Product).where(Product.store_id == store_id, Product.sku == data.sku))
+    if existing:
+        raise ValueError(f"Product SKU {data.sku} already exists")
+    product = Product(
+        store_id=store_id,
+        sku=data.sku,
+        name=data.name,
+        canonical_name=data.canonical_name or data.name,
+        category=data.category,
+        unit=data.unit,
+        price=data.price,
+        stock_quantity=data.stock_quantity,
+        status=data.status,
+        notes=data.notes,
+    )
+    db.add(product)
+    db.flush()
+    record_audit_event(db, store_id=store_id, action=AuditAction.product_created, entity_type="product", entity_id=product.id, evidence=data.model_dump())
+    db.commit()
+    db.refresh(product)
+    return product
+
+
+def update_product(db: Session, product_id: int, data: ProductUpdateIn, *, store_id: int) -> Product:
+    product = get_product(db, product_id, store_id=store_id)
+    before = {"sku": product.sku, "name": product.name, "status": str(product.status), "price": product.price, "stock_quantity": product.stock_quantity}
+    updates = data.model_dump(exclude_unset=True)
+    if "sku" in updates and updates["sku"] != product.sku:
+        existing = db.scalar(select(Product).where(Product.store_id == store_id, Product.sku == updates["sku"]))
+        if existing:
+            raise ValueError(f"Product SKU {updates['sku']} already exists")
+    if updates.get("canonical_name") is None and updates.get("name"):
+        updates["canonical_name"] = updates["name"]
+    for key, value in updates.items():
+        setattr(product, key, value)
+    record_audit_event(db, store_id=store_id, action=AuditAction.product_updated, entity_type="product", entity_id=product.id, evidence={"from": before, "to": updates})
+    db.commit()
+    db.refresh(product)
+    return product
+
+
+def add_product_substitution(db: Session, product_id: int, data: ProductSubstitutionIn, *, store_id: int) -> ProductSubstitution:
+    get_product(db, product_id, store_id=store_id)
+    get_product(db, data.substitute_product_id, store_id=store_id)
+    if product_id == data.substitute_product_id:
+        raise ValueError("A product cannot substitute itself")
+    existing = db.scalar(select(ProductSubstitution).where(
+        ProductSubstitution.store_id == store_id,
+        ProductSubstitution.product_id == product_id,
+        ProductSubstitution.substitute_product_id == data.substitute_product_id,
+    ))
+    if existing:
+        return existing
+    substitution = ProductSubstitution(store_id=store_id, product_id=product_id, substitute_product_id=data.substitute_product_id, reason=data.reason)
+    db.add(substitution)
+    db.flush()
+    record_audit_event(db, store_id=store_id, action=AuditAction.product_substitution_added, entity_type="product", entity_id=product_id, evidence=data.model_dump())
+    db.commit()
+    db.refresh(substitution)
+    return substitution
+
+
+def list_product_substitutions(db: Session, product_id: int, *, store_id: int) -> list[ProductSubstitution]:
+    get_product(db, product_id, store_id=store_id)
+    return list(db.scalars(
+        select(ProductSubstitution)
+        .where(ProductSubstitution.store_id == store_id, ProductSubstitution.product_id == product_id)
+        .options(selectinload(ProductSubstitution.substitute))
+        .order_by(ProductSubstitution.created_at.desc())
+    ).all())
+
+
+def update_order_notes(db: Session, order_id: int, data: OrderNotesUpdateIn, *, store_id: int) -> Order:
+    order = _load_order(db, order_id, store_id=store_id)
+    before = order.notes
+    order.notes = data.notes
+    record_audit_event(db, store_id=store_id, action=AuditAction.order_note_updated, entity_type="order", entity_id=order.id, evidence={"from": before, "to": data.notes})
+    db.commit()
+    return _load_order(db, order_id, store_id=store_id)
+
+
+def repeat_order(db: Session, order_id: int, data: RepeatOrderIn, *, store_id: int) -> Order:
+    source = _load_order(db, order_id, store_id=store_id)
+    if data.status not in {OrderStatus.pending, OrderStatus.needs_review}:
+        raise ValueError("Repeat orders can only start as pending or needs_review")
+    new_order = Order(
+        store_id=store_id,
+        customer_id=source.customer_id,
+        status=data.status,
+        notes=data.notes or f"Repeat of order #{source.id}",
+        amount_due=source.amount_due,
+        is_credit=bool(source.is_credit),
+    )
+    db.add(new_order)
+    db.flush()
+    for item in source.items:
+        db.add(OrderItem(
+            order_id=new_order.id,
+            name=item.name,
+            quantity=item.quantity,
+            unit=item.unit,
+            confidence=1.0,
+            product_id=item.product_id,
+            substitution_for_item_id=None,
+            notes=item.notes,
+        ))
+    record_audit_event(db, store_id=store_id, action=AuditAction.repeat_order_created, entity_type="order", entity_id=new_order.id, evidence={"source_order_id": source.id})
+    db.commit()
+    return _load_order(db, new_order.id, store_id=store_id)
+
+
+def assign_staff(db: Session, order_id: int, data: StaffAssignmentIn, *, store_id: int) -> StaffAssignment:
+    _load_order(db, order_id, store_id=store_id)
+    operator = db.scalar(select(Operator).where(Operator.id == data.operator_id, Operator.store_id == store_id))
+    if not operator:
+        raise ValueError(f"Operator {data.operator_id} not found")
+    assignment = StaffAssignment(store_id=store_id, order_id=order_id, operator_id=data.operator_id, role=data.role, notes=data.notes)
+    db.add(assignment)
+    db.flush()
+    record_audit_event(db, store_id=store_id, action=AuditAction.staff_assignment_created, entity_type="order", entity_id=order_id, evidence={"assignment_id": assignment.id, "operator_id": data.operator_id, "role": data.role})
+    db.commit()
+    db.refresh(assignment)
+    return assignment
+
+
+def list_staff_assignments(db: Session, *, store_id: int, order_id: int | None = None, operator_id: int | None = None) -> list[StaffAssignment]:
+    stmt = select(StaffAssignment).where(StaffAssignment.store_id == store_id).order_by(StaffAssignment.created_at.desc())
+    if order_id is not None:
+        stmt = stmt.where(StaffAssignment.order_id == order_id)
+    if operator_id is not None:
+        stmt = stmt.where(StaffAssignment.operator_id == operator_id)
+    return list(db.scalars(stmt).all())
+
+
+def update_staff_assignment(db: Session, assignment_id: int, data: StaffAssignmentUpdateIn, *, store_id: int) -> StaffAssignment:
+    assignment = db.scalar(select(StaffAssignment).where(StaffAssignment.id == assignment_id, StaffAssignment.store_id == store_id))
+    if not assignment:
+        raise ValueError(f"Staff assignment {assignment_id} not found")
+    before = {"status": str(assignment.status), "notes": assignment.notes}
+    updates = data.model_dump(exclude_unset=True)
+    for key, value in updates.items():
+        setattr(assignment, key, value)
+    record_audit_event(db, store_id=store_id, action=AuditAction.staff_assignment_updated, entity_type="order", entity_id=assignment.order_id, evidence={"assignment_id": assignment.id, "from": before, "to": updates})
+    db.commit()
+    db.refresh(assignment)
+    return assignment
+
+
+def customer_history(db: Session, customer_id: int, *, store_id: int, limit: int = 10) -> dict:
+    customer, dormant = get_customer_with_dormant(db, customer_id, store_id=store_id)
+    orders = list_orders(db, customer_id=customer_id, store_id=store_id, limit=limit)
+    totals = db.execute(select(func.count(Order.id), func.coalesce(func.sum(Order.amount_due), 0.0)).where(Order.store_id == store_id, Order.customer_id == customer_id)).one()
+    item_rows = db.execute(
+        select(OrderItem.name, func.count(OrderItem.id).label("count"), func.coalesce(func.sum(OrderItem.quantity), 0.0).label("total_quantity"))
+        .join(Order, OrderItem.order_id == Order.id)
+        .where(Order.store_id == store_id, Order.customer_id == customer_id)
+        .group_by(OrderItem.name)
+        .order_by(func.count(OrderItem.id).desc())
+        .limit(5)
+    ).all()
+    out = CustomerOut.model_validate(customer)  # type: ignore[name-defined]
+    out.dormant = dormant
+    return {
+        "customer": out,
+        "recent_orders": orders,
+        "lifetime_orders": int(totals[0] or 0),
+        "lifetime_amount_due": float(totals[1] or 0.0),
+        "top_items": [{"name": r.name, "count": r.count, "total_quantity": float(r.total_quantity)} for r in item_rows],
+    }
+
+
+def record_ai_usage(db: Session, data: AiUsageEventCreateIn, *, store_id: int) -> AiUsageEvent:
+    event = AiUsageEvent(store_id=store_id, **data.model_dump())
+    db.add(event)
+    db.flush()
+    record_audit_event(db, store_id=store_id, action=AuditAction.ai_usage_recorded, entity_type="ai_usage_event", entity_id=event.id, evidence=data.model_dump())
+    db.commit()
+    db.refresh(event)
+    return event
+
+
+def ai_usage_events(db: Session, *, store_id: int, day: str | None = None, limit: int = 100) -> list[AiUsageEvent]:
+    stmt = select(AiUsageEvent).where(AiUsageEvent.store_id == store_id).order_by(AiUsageEvent.created_at.desc()).limit(limit)
+    if day:
+        start = datetime.fromisoformat(day).replace(tzinfo=timezone.utc)
+        stmt = stmt.where(AiUsageEvent.created_at >= start, AiUsageEvent.created_at < start + timedelta(days=1))
+    return list(db.scalars(stmt).all())
+
+
+def ai_usage_summary(db: Session, *, store_id: int, day: str | None = None) -> dict:
+    events = ai_usage_events(db, store_id=store_id, day=day, limit=10_000)
+    by_provider: dict[str, int] = {}
+    by_purpose: dict[str, int] = {}
+    for event in events:
+        by_provider[event.provider] = by_provider.get(event.provider, 0) + 1
+        by_purpose[str(event.purpose)] = by_purpose.get(str(event.purpose), 0) + 1
+    return {
+        "store_id": store_id,
+        "day": day,
+        "total_events": len(events),
+        "total_estimated_units": float(sum(e.estimated_units for e in events)),
+        "total_estimated_cost": float(sum(e.estimated_cost for e in events)),
+        "by_provider": by_provider,
+        "by_purpose": by_purpose,
+    }
+
+
+def operations_daily_report(db: Session, *, store_id: int, day: str | None = None) -> dict:
+    base = daily_closing(db, store_id=store_id, day=day)
+    orders_created = base["orders_created"] or 0
+    manual = base["needs_review"]
+    ai = ai_usage_summary(db, store_id=store_id, day=base["day"])
+    return {
+        "store_id": store_id,
+        "day": base["day"],
+        "orders_created": orders_created,
+        "orders_delivered": base["delivered"],
+        "orders_cancelled": base["cancelled"],
+        "needs_review": base["needs_review"],
+        "pending": base["pending_end_of_day"],
+        "packed": base["packed_end_of_day"],
+        "amount_due_total": base["amount_due_total"],
+        "credit_extended_total": base["credit_extended_total"],
+        "average_order_value": float(base["amount_due_total"] / orders_created) if orders_created else 0.0,
+        "manual_intervention_rate": float(manual / orders_created) if orders_created else 0.0,
+        "top_items": top_items(db, days=1, limit=10, store_id=store_id),
+        "ai_usage_count": ai["total_events"],
+        "ai_estimated_cost": ai["total_estimated_cost"],
+    }

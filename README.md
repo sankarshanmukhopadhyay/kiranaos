@@ -1,6 +1,6 @@
 # KiranaOS
 
-**WhatsApp-native order capture and pilot-safe merchant operations for kirana store owners.**
+**WhatsApp-native order capture and daily merchant operations for kirana stores and small businesses.**
 
 Customers keep sending WhatsApp messages exactly as they always have — photos of handwritten lists, voice notes, freeform text in any language. KiranaOS converts those messages into a structured order dashboard. Pending, packing, delivered. Udhaari tracked per customer. Customers silent for two weeks are flagged, udhaari remains visible, and low-confidence orders can be reviewed before fulfillment.
 
@@ -24,7 +24,7 @@ make dev-frontend   # terminal 2: frontend on :5173
 make seed           # optional: load demo data
 ```
 
-Open **http://localhost:5173**. Click **"Simulate WA order"** in the sidebar to watch the Release 1 ingestion and review workflow run.
+Open **http://localhost:5173**. Click **"Simulate WA order"** in the sidebar to watch the ingestion, review, and operations workflow run.
 
 The interactive API documentation is at **http://localhost:8000/docs**.
 
@@ -59,8 +59,8 @@ kiranaos/
 │   │   │       └── sarvam_chat.py     # Optional: Sarvam Chat (sarvam-30b)
 │   │   └── main.py                # FastAPI app factory
 │   ├── tests/
-│   │   ├── test_parser.py         # Parser unit tests (14 cases, pure function)
-│   │   │   ├── test_api.py            # API integration tests (SQLite test DB)
+│   │   ├── test_parser.py         # Parser unit tests (pure function)
+│   │   ├── test_api.py            # API integration tests (SQLite test DB)
 │   │   └── test_sarvam_adapters.py # Sarvam adapter conformance tests (mocked HTTP)
 │   ├── Dockerfile
 │   ├── alembic/                   # Production migration baseline
@@ -271,17 +271,26 @@ make migrate
 ---
 
 
+### v2.4.0 Operations Release
+
+The v2.4.0 Release 2 Operations Release turns the Release 1 foundation into a daily merchant operations workflow:
+
+- catalog product management with store-scoped SKU uniqueness;
+- product substitutions for operator-approved alternatives;
+- product binding and item notes during order correction;
+- repeat orders from prior customer orders;
+- customer history with recent orders, lifetime totals, and top items;
+- staff assignment lifecycle for fulfillment work allocation;
+- order notes for packing and delivery instructions;
+- daily operations reporting;
+- feature flags for operations capabilities;
+- AI usage tracking for provider cost and reliability evidence.
+
+See [`docs/RELEASE_NOTES_v2.4.0.md`](docs/RELEASE_NOTES_v2.4.0.md) for full release notes.
+
 ### v2.3.0 Commercial Foundation Release
 
-The v2.3.0 Release 1 Commercial Foundation release stabilizes KiranaOS for controlled merchant pilots:
-
-- provider-correct STT, OCR, and parser fallback configuration for OpenAI, Google Vision, Sarvam, or review-only mode;
-- duplicate inbound message protection for provider webhook retries;
-- review/correction APIs for unparsed or operator-verified orders;
-- guarded order lifecycle transitions;
-- auth-aware frontend API client with operator login/logout;
-- pilot dashboard surfaces for Review Queue, Daily Closing, order inspection, and audit trail visibility;
-- release roadmap and pilot readiness documentation.
+The v2.3.0 Release 1 Commercial Foundation release stabilized KiranaOS for controlled merchant pilots with provider correctness, ingestion safety, review/correction workflow, auth-enabled pilot UI, auditability, tests, and adoption documentation.
 
 See [`docs/RELEASE_NOTES_v2.3.0.md`](docs/RELEASE_NOTES_v2.3.0.md) for full release notes.
 
@@ -305,6 +314,7 @@ See [`SECURITY.md`](SECURITY.md) for the production checklist and trust-boundary
 See [`ROADMAP.md`](ROADMAP.md) for the current commercial maturity roadmap.
 
 - [x] Release 1 Commercial Foundation: repo health, provider correctness, review workflow, auth-enabled pilot UI, auditability, tests, and adoption documentation
+- [x] Release 2 Operations: catalog, substitutions, repeat orders, customer history, staff assignment, AI usage tracking, and daily operations reporting
 - [x] Voice note transcription through a configurable OpenAI or Sarvam Saaras audio adapter, with safe `needs_review` fallback when no key is configured — see `docs/AI_PROVIDERS.md`
 - [x] Outbound WhatsApp confirmation records for order lifecycle events, simulated locally and ready for provider dispatch
 - [x] Delivery assignment, delivery status lifecycle, and route-ordered agent stop lists
@@ -318,13 +328,16 @@ See [`ROADMAP.md`](ROADMAP.md) for the current commercial maturity roadmap.
 
 ### Documentation
 
+- [`docs/index.md`](docs/index.md) — GitHub Pages/Jekyll documentation home
 - [`docs/ADOPTION_GUIDE.md`](docs/ADOPTION_GUIDE.md)
 - [`docs/API_GUIDE.md`](docs/API_GUIDE.md)
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 - [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)
 - [`docs/OPERATIONS.md`](docs/OPERATIONS.md)
+- [`docs/OPERATIONS_RELEASE.md`](docs/OPERATIONS_RELEASE.md)
 - [`docs/SECURITY_MODEL.md`](docs/SECURITY_MODEL.md)
 - [`docs/TESTING.md`](docs/TESTING.md)
+- [`docs/JEKYLL_GITHUB_PAGES.md`](docs/JEKYLL_GITHUB_PAGES.md)
 
 ---
 

@@ -1,0 +1,16 @@
+title: KiranaOS Documentation
+description: WhatsApp-native merchant operations workflow for kirana and small-store pilots.
+theme: minima
+markdown: kramdown
+plugins:
+  - jekyll-feed
+header_pages:
+  - index.md
+  - ADOPTION_GUIDE.md
+  - ARCHITECTURE.md
+  - API_GUIDE.md
+  - OPERATIONS.md
+  - TESTING.md
+  - RELEASE_NOTES_v2.4.0.md
+exclude:
+  - .DS_Store

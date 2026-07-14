@@ -1,3 +1,9 @@
+---
+layout: page
+title: Deployment Guide
+permalink: /deployment/
+---
+
 # Deployment Guide
 
 ## Recommended Stack

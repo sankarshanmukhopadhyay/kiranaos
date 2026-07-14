@@ -80,6 +80,26 @@ class PaymentStatus(StrEnum):
     failed     = "failed"
 
 
+class ProductStatus(StrEnum):
+    active = "active"
+    inactive = "inactive"
+
+
+class StaffAssignmentStatus(StrEnum):
+    assigned = "assigned"
+    accepted = "accepted"
+    completed = "completed"
+    reassigned = "reassigned"
+    cancelled = "cancelled"
+
+
+class AiUsagePurpose(StrEnum):
+    parse = "parse"
+    ocr = "ocr"
+    stt = "stt"
+    review_assist = "review_assist"
+
+
 class AuditAction(StrEnum):
     order_status_updated = "order_status_updated"
     order_amount_updated = "order_amount_updated"
@@ -93,6 +113,14 @@ class AuditAction(StrEnum):
     order_review_resolved = "order_review_resolved"
     order_items_corrected = "order_items_corrected"
     customer_updated = "customer_updated"
+    product_created = "product_created"
+    product_updated = "product_updated"
+    product_substitution_added = "product_substitution_added"
+    staff_assignment_created = "staff_assignment_created"
+    staff_assignment_updated = "staff_assignment_updated"
+    order_note_updated = "order_note_updated"
+    repeat_order_created = "repeat_order_created"
+    ai_usage_recorded = "ai_usage_recorded"
 
 
 # ── Store / tenancy ───────────────────────────────────────────────────────────
@@ -109,6 +137,7 @@ class Store(Base):
 
     customers: Mapped[list["Customer"]] = relationship(back_populates="store")
     operators: Mapped[list["Operator"]] = relationship(back_populates="store")
+    products: Mapped[list["Product"]] = relationship(back_populates="store")
 
 
 class Operator(Base):
@@ -201,6 +230,48 @@ class Order(Base):
     delivery_assignment: Mapped["DeliveryAssignment | None"] = relationship(back_populates="order")
     outbound_messages: Mapped[list["OutboundMessage"]] = relationship(back_populates="order")
     payments: Mapped[list["Payment"]] = relationship(back_populates="order")
+    staff_assignments: Mapped[list["StaffAssignment"]] = relationship(back_populates="order")
+
+
+# ── Product catalog ──────────────────────────────────────────────────────────
+
+class Product(Base):
+    __tablename__ = "products"
+    __table_args__ = (UniqueConstraint("store_id", "sku", name="uq_product_store_sku"),)
+
+    id:             Mapped[int]           = mapped_column(Integer, primary_key=True)
+    store_id:       Mapped[int]           = mapped_column(ForeignKey("stores.id"), default=1, index=True)
+    sku:            Mapped[str]           = mapped_column(String(80), index=True)
+    name:           Mapped[str]           = mapped_column(String(160), index=True)
+    canonical_name: Mapped[str]           = mapped_column(String(160), index=True)
+    category:       Mapped[str | None]    = mapped_column(String(80), nullable=True, index=True)
+    unit:           Mapped[str]           = mapped_column(String(32), default="pcs")
+    price:          Mapped[float | None]  = mapped_column(Float, nullable=True)
+    stock_quantity: Mapped[float | None]  = mapped_column(Float, nullable=True)
+    status:         Mapped[ProductStatus] = mapped_column(Enum(ProductStatus), default=ProductStatus.active, index=True)
+    notes:          Mapped[str | None]    = mapped_column(Text, nullable=True)
+    created_at:     Mapped[datetime]      = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at:     Mapped[datetime]      = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    store: Mapped[Store] = relationship(back_populates="products")
+    substitutions_from: Mapped[list["ProductSubstitution"]] = relationship(
+        back_populates="product", foreign_keys="ProductSubstitution.product_id", cascade="all, delete-orphan"
+    )
+
+
+class ProductSubstitution(Base):
+    __tablename__ = "product_substitutions"
+    __table_args__ = (UniqueConstraint("store_id", "product_id", "substitute_product_id", name="uq_product_substitution_pair"),)
+
+    id:                    Mapped[int]      = mapped_column(Integer, primary_key=True)
+    store_id:              Mapped[int]      = mapped_column(ForeignKey("stores.id"), default=1, index=True)
+    product_id:            Mapped[int]      = mapped_column(ForeignKey("products.id"), index=True)
+    substitute_product_id: Mapped[int]      = mapped_column(ForeignKey("products.id"), index=True)
+    reason:                Mapped[str | None] = mapped_column(String(160), nullable=True)
+    created_at:            Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    product: Mapped[Product] = relationship(foreign_keys=[product_id], back_populates="substitutions_from")
+    substitute: Mapped[Product] = relationship(foreign_keys=[substitute_product_id])
 
 
 # ── OrderItem ─────────────────────────────────────────────────────────────────
@@ -220,8 +291,46 @@ class OrderItem(Base):
     quantity:   Mapped[float] = mapped_column(Float, default=1.0)
     unit:       Mapped[str]   = mapped_column(String(32), default="pcs")
     confidence: Mapped[float] = mapped_column(Float, default=0.7)
+    product_id: Mapped[int | None] = mapped_column(ForeignKey("products.id"), nullable=True, index=True)
+    substitution_for_item_id: Mapped[int | None] = mapped_column(ForeignKey("order_items.id"), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    order: Mapped[Order] = relationship(back_populates="items")
+    order: Mapped[Order] = relationship(back_populates="items", foreign_keys=[order_id])
+    product: Mapped[Product | None] = relationship()
+
+
+class StaffAssignment(Base):
+    __tablename__ = "staff_assignments"
+
+    id:          Mapped[int]                   = mapped_column(Integer, primary_key=True)
+    store_id:    Mapped[int]                   = mapped_column(ForeignKey("stores.id"), default=1, index=True)
+    order_id:    Mapped[int]                   = mapped_column(ForeignKey("orders.id"), index=True)
+    operator_id: Mapped[int]                   = mapped_column(ForeignKey("operators.id"), index=True)
+    role:        Mapped[str]                   = mapped_column(String(40), default="fulfillment")
+    status:      Mapped[StaffAssignmentStatus] = mapped_column(Enum(StaffAssignmentStatus), default=StaffAssignmentStatus.assigned, index=True)
+    notes:       Mapped[str | None]            = mapped_column(Text, nullable=True)
+    created_at:  Mapped[datetime]              = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at:  Mapped[datetime]              = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    order: Mapped[Order] = relationship(back_populates="staff_assignments")
+    operator: Mapped[Operator] = relationship()
+
+
+class AiUsageEvent(Base):
+    __tablename__ = "ai_usage_events"
+
+    id:                 Mapped[int]            = mapped_column(Integer, primary_key=True)
+    store_id:           Mapped[int]            = mapped_column(ForeignKey("stores.id"), default=1, index=True)
+    provider:           Mapped[str]            = mapped_column(String(40), index=True)
+    model:              Mapped[str | None]     = mapped_column(String(120), nullable=True)
+    purpose:            Mapped[AiUsagePurpose] = mapped_column(Enum(AiUsagePurpose), index=True)
+    inbound_message_id: Mapped[int | None]     = mapped_column(ForeignKey("inbound_messages.id"), nullable=True, index=True)
+    order_id:           Mapped[int | None]     = mapped_column(ForeignKey("orders.id"), nullable=True, index=True)
+    estimated_units:    Mapped[float]          = mapped_column(Float, default=0.0)
+    estimated_cost:     Mapped[float]          = mapped_column(Float, default=0.0)
+    success:            Mapped[bool]           = mapped_column(Integer, default=True)
+    failure_reason:     Mapped[str | None]     = mapped_column(String(160), nullable=True)
+    created_at:         Mapped[datetime]       = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
 
 
 # ── LedgerEntry ───────────────────────────────────────────────────────────────

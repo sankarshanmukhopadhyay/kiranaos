@@ -1,3 +1,9 @@
+---
+layout: page
+title: Adoption Guide
+permalink: /adoption-guide/
+---
+
 # Adoption Guide
 
 This guide is for a developer or operator evaluating KiranaOS for a real kirana workflow.

@@ -1,3 +1,9 @@
+---
+layout: page
+title: Architecture
+permalink: /architecture/
+---
+
 # Architecture
 
 KiranaOS keeps the customer's behaviour unchanged. They continue sending WhatsApp messages,

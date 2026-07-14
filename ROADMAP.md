@@ -1,59 +1,52 @@
 # KiranaOS Roadmap
 
-KiranaOS is managed as a merchant workflow platform, not as an open-ended AI demo. Roadmap items are sequenced by commercial evidence: adoption, retention, operational value, and monetization readiness.
+KiranaOS follows a commercially sequenced roadmap. Each release must strengthen adoption, daily retention, or monetization evidence without turning AI into an uncontrolled authority layer.
 
-## Now: Release 1 Commercial Foundation, v2.3.0
+## Completed: Release 1 Commercial Foundation, v2.3.0
 
-Release 1 stabilizes the current codebase for controlled pilots.
+Release 1 stabilized the repository for controlled pilots: provider correctness, ingestion safety, review/correction workflow, auth-enabled pilot UI, auditability, tests, and adoption documentation.
 
-**In scope**
+## Completed: Release 2 Operations Release, v2.4.0
 
-- Repo health, dependency consistency, CI-ready commands, and release hygiene.
-- Provider-correct AI dispatch for STT, OCR, and parser fallback.
-- Safe ingestion fallback for text, image, and voice messages.
-- Duplicate inbound message protection using provider message ids.
-- Review/correction workflow for unparsed orders.
-- Guarded order lifecycle transitions.
-- Auth-enabled frontend API client and operator login flow.
-- Audit events for review resolution, item correction, customer updates, duplicate message handling, and order lifecycle changes.
-- Pilot documentation, operator guides, and known limitations.
+Release 2 makes KiranaOS useful for daily merchant operations. The release adds product catalog management, substitutions, order item product binding, repeat orders, customer history, staff assignment, order notes, daily operations reporting, feature flags, and AI usage tracking.
 
-**Explicitly out of scope**
+### Release 2 acceptance criteria
 
-- Billing and subscription management.
-- Distributor dashboards.
-- Autonomous agents or MCP orchestration.
-- Advanced payment automation.
-- Credit scoring or lending decisions.
-- Production multi-tenant SaaS administration.
+- A merchant operator can maintain a simple product catalog.
+- Ambiguous order items can be corrected and linked to catalog products.
+- Approved substitutions can be recorded without rewriting the original customer request.
+- Repeat orders can be generated from historical orders.
+- Customer history is queryable without manual database inspection.
+- Store staff can be assigned to fulfillment tasks.
+- AI usage can be recorded and summarized as an operational cost signal.
+- The daily report produces operational evidence for pilots.
 
-## Next: Release 2 Operations Release
+## Next: Release 3 Order-to-Cash Release
 
-Release 2 should convert the pilot foundation into a daily store operating workflow.
+Release 3 should focus on monetizable workflow surfaces: payment status, reconciliation depth, refund/cancellation handling, daily settlement, accounting export, and pilot billing evidence.
 
-- Product/catalog management.
-- Customer edit workflows and household history.
-- Repeat order shortcuts.
-- Delivery notes and staff handoff.
-- Daily order reports and exports.
-- Deeper frontend forms for item correction and amount updates.
-- Feature flags for paid operational modules.
-- AI usage/cost reporting sufficient for pricing experiments.
+### Candidate scope
 
-## Later: Release 3 Order-to-Cash Release
+- Payment status model and reconciliation UI hardening.
+- Refund and cancellation workflow.
+- Cash/UPI split handling.
+- Daily settlement report.
+- CSV/XLSX export for accountant/POS handoff.
+- Quota and plan enforcement foundations.
+- Stronger operator role boundaries around money movement.
 
-Release 3 should create the first strong monetization surface.
+## Later
 
-- Payment status per order.
-- UPI reference capture and mismatch queue.
-- Refund/cancellation workflow.
-- Daily settlement exports.
-- Accounting/POS adapter interface.
-- Pilot billing hooks and plan/quota enforcement.
+- Distributor-sponsored flows.
+- Multi-merchant partner console.
+- API keys and webhooks for platform integrations.
+- Offline-first workflows.
+- Vertical packs for restaurants, pharmacies, bakeries, and cloud kitchens.
 
-## Not planned for the current roadmap
+## Not planned for core releases
 
-- Fully autonomous fulfilment actions.
-- Model-driven pricing, lending, or eligibility decisions.
-- Distributor-sponsored analytics without explicit consent and data-sharing controls.
-- Open-ended agent tooling in the critical order/payment write path.
+- Autonomous agents with direct write authority.
+- Credit scoring.
+- Advanced dynamic pricing.
+- Marketplace orchestration.
+- Distributor monetization before store operations and order-to-cash evidence are stable.

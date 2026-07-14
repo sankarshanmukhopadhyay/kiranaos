@@ -1,3 +1,9 @@
+---
+layout: page
+title: KiranaOS v2.3.0 Release Notes
+permalink: /release-notes-v2.3.0/
+---
+
 # KiranaOS v2.3.0 Release Notes
 
 ## Release theme

@@ -21,6 +21,9 @@ from app.core.config import get_settings
 from app.db.session import get_db
 from app.models.domain import AuditAction, MessageType, Operator, OperatorRole, OrderStatus, Store
 from app.schemas.domain import (
+    AiUsageEventCreateIn,
+    AiUsageEventOut,
+    AiUsageSummaryOut,
     AmountUpdateIn,
     AuditEventOut,
     CreditAdjustIn,
@@ -35,21 +38,34 @@ from app.schemas.domain import (
     DeliveryAssignmentIn,
     DeliveryAssignmentOut,
     DeliveryAssignmentStatusIn,
+    FeatureFlagsOut,
     IngestMessageIn,
     InputMethodStat,
     LedgerEntryOut,
     LoginIn,
+    OperationsDailyReportOut,
     OperatorCreateIn,
     OperatorOut,
     OrderCorrectionIn,
+    OrderNotesUpdateIn,
     OrderOut,
     OrderReviewResolveIn,
     OutboundConfirmationIn,
     OutboundMessageOut,
     PaymentOut,
+    ProductCreateIn,
+    ProductOut,
+    ProductStatus,
+    ProductSubstitutionIn,
+    ProductSubstitutionOut,
+    ProductUpdateIn,
+    RepeatOrderIn,
     RouteOptimizeIn,
     RouteOptimizeOut,
     RouteStop,
+    StaffAssignmentIn,
+    StaffAssignmentOut,
+    StaffAssignmentUpdateIn,
     StatusUpdateIn,
     StoreCreateIn,
     StoreOut,
@@ -71,24 +87,40 @@ from app.services.auth import (
 )
 from app.services.ingestion import (
     _is_dormant,
+    add_product_substitution,
     adjust_credit,
+    ai_usage_events,
+    ai_usage_summary,
+    assign_staff,
     correct_order_items,
     create_customer,
+    create_product,
+    customer_history,
     daily_closing,
     daily_metrics,
     dashboard_summary,
     get_customer_with_dormant,
     get_ledger,
     get_order,
+    get_product,
     ingest_message,
     input_method_stats,
     list_customers,
     list_orders,
+    list_product_substitutions,
+    list_products,
+    list_staff_assignments,
+    operations_daily_report,
+    record_ai_usage,
+    repeat_order,
     resolve_order_review,
     top_items,
     update_customer,
     update_order_amount,
+    update_order_notes,
     update_order_status,
+    update_product,
+    update_staff_assignment,
 )
 from app.services.operations import (
     assign_delivery,
@@ -122,6 +154,27 @@ def health() -> dict:
         "demo_mode": settings.demo_mode,
         "auth_required": settings.auth_required,
         "providers": {"stt": settings.stt_provider, "ocr": settings.ocr_provider, "parser_ai": settings.parser_ai_provider},
+        "feature_flags": {
+            "catalog_enabled": settings.catalog_enabled,
+            "staff_assignment_enabled": settings.staff_assignment_enabled,
+            "repeat_orders_enabled": settings.repeat_orders_enabled,
+            "ai_usage_tracking_enabled": settings.ai_usage_tracking_enabled,
+            "payments_enabled": settings.payments_enabled,
+            "delivery_enabled": settings.delivery_enabled,
+        },
+    }
+
+
+@router.get("/features", response_model=FeatureFlagsOut)
+def feature_flags():
+    settings = get_settings()
+    return {
+        "catalog_enabled": settings.catalog_enabled,
+        "staff_assignment_enabled": settings.staff_assignment_enabled,
+        "repeat_orders_enabled": settings.repeat_orders_enabled,
+        "ai_usage_tracking_enabled": settings.ai_usage_tracking_enabled,
+        "payments_enabled": settings.payments_enabled,
+        "delivery_enabled": settings.delivery_enabled,
     }
 
 
@@ -331,6 +384,47 @@ def set_order_amount(order_id: int, payload: AmountUpdateIn, db: DbDep, store_id
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+@router.patch("/orders/{order_id}/notes", response_model=OrderOut)
+def set_order_notes(order_id: int, payload: OrderNotesUpdateIn, db: DbDep, store_id: StoreDep, _operator: StaffDep):
+    try:
+        return update_order_notes(db, order_id, payload, store_id=store_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/orders/{order_id}/repeat", response_model=OrderOut, status_code=201)
+def create_repeat_order(order_id: int, payload: RepeatOrderIn, db: DbDep, store_id: StoreDep, _operator: StaffDep):
+    if not get_settings().repeat_orders_enabled:
+        raise HTTPException(status_code=404, detail="Repeat orders are disabled")
+    try:
+        return repeat_order(db, order_id, payload, store_id=store_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400 if "Repeat orders" in str(exc) else 404, detail=str(exc)) from exc
+
+
+@router.post("/orders/{order_id}/staff-assignments", response_model=StaffAssignmentOut, status_code=201)
+def create_staff_assignment(order_id: int, payload: StaffAssignmentIn, db: DbDep, store_id: StoreDep, _operator: ManagerDep):
+    if not get_settings().staff_assignment_enabled:
+        raise HTTPException(status_code=404, detail="Staff assignment is disabled")
+    try:
+        return assign_staff(db, order_id, payload, store_id=store_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/staff-assignments", response_model=list[StaffAssignmentOut])
+def staff_assignments(db: DbDep, store_id: StoreDep, order_id: int | None = Query(default=None), operator_id: int | None = Query(default=None)):
+    return list_staff_assignments(db, store_id=store_id, order_id=order_id, operator_id=operator_id)
+
+
+@router.patch("/staff-assignments/{assignment_id}", response_model=StaffAssignmentOut)
+def edit_staff_assignment(assignment_id: int, payload: StaffAssignmentUpdateIn, db: DbDep, store_id: StoreDep, _operator: StaffDep):
+    try:
+        return update_staff_assignment(db, assignment_id, payload, store_id=store_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @router.post("/orders/{order_id}/confirmations", response_model=OutboundMessageOut, status_code=201)
 def send_order_confirmation(
     order_id: int,
@@ -418,6 +512,89 @@ def ledger(customer_id: int, db: DbDep, store_id: StoreDep):
         return get_ledger(db, customer_id, store_id=store_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/customers/{customer_id}/history")
+def customer_order_history(customer_id: int, db: DbDep, store_id: StoreDep, limit: int = Query(default=10, le=50)):
+    try:
+        return customer_history(db, customer_id, store_id=store_id, limit=limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+# ── Catalog ──────────────────────────────────────────────────────────────────
+
+@router.get("/catalog/products", response_model=list[ProductOut])
+def products(db: DbDep, store_id: StoreDep, status: ProductStatus | None = Query(default=None), q: str | None = Query(default=None), limit: int = Query(default=100, le=500), offset: int = Query(default=0)):
+    if not get_settings().catalog_enabled:
+        raise HTTPException(status_code=404, detail="Catalog is disabled")
+    return list_products(db, store_id=store_id, status=status, q=q, limit=limit, offset=offset)
+
+
+@router.post("/catalog/products", response_model=ProductOut, status_code=201)
+def add_product(payload: ProductCreateIn, db: DbDep, store_id: StoreDep, _operator: ManagerDep):
+    if not get_settings().catalog_enabled:
+        raise HTTPException(status_code=404, detail="Catalog is disabled")
+    try:
+        return create_product(db, payload, store_id=store_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get("/catalog/products/{product_id}", response_model=ProductOut)
+def product_detail(product_id: int, db: DbDep, store_id: StoreDep):
+    try:
+        return get_product(db, product_id, store_id=store_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.patch("/catalog/products/{product_id}", response_model=ProductOut)
+def edit_product(product_id: int, payload: ProductUpdateIn, db: DbDep, store_id: StoreDep, _operator: ManagerDep):
+    try:
+        return update_product(db, product_id, payload, store_id=store_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409 if "already exists" in str(exc) else 404, detail=str(exc)) from exc
+
+
+@router.post("/catalog/products/{product_id}/substitutions", response_model=ProductSubstitutionOut, status_code=201)
+def add_substitution(product_id: int, payload: ProductSubstitutionIn, db: DbDep, store_id: StoreDep, _operator: ManagerDep):
+    try:
+        return add_product_substitution(db, product_id, payload, store_id=store_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400 if "cannot substitute" in str(exc) else 404, detail=str(exc)) from exc
+
+
+@router.get("/catalog/products/{product_id}/substitutions", response_model=list[ProductSubstitutionOut])
+def substitutions(product_id: int, db: DbDep, store_id: StoreDep):
+    try:
+        return list_product_substitutions(db, product_id, store_id=store_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+# ── Operations reporting and AI usage ────────────────────────────────────────
+
+@router.get("/operations/daily-report", response_model=OperationsDailyReportOut)
+def daily_report(db: DbDep, store_id: StoreDep, day: str | None = Query(default=None)):
+    return operations_daily_report(db, store_id=store_id, day=day)
+
+
+@router.post("/operations/ai-usage", response_model=AiUsageEventOut, status_code=201)
+def add_ai_usage(payload: AiUsageEventCreateIn, db: DbDep, store_id: StoreDep, _operator: StaffDep):
+    if not get_settings().ai_usage_tracking_enabled:
+        raise HTTPException(status_code=404, detail="AI usage tracking is disabled")
+    return record_ai_usage(db, payload, store_id=store_id)
+
+
+@router.get("/operations/ai-usage", response_model=list[AiUsageEventOut])
+def list_ai_usage(db: DbDep, store_id: StoreDep, day: str | None = Query(default=None), limit: int = Query(default=100, le=1000)):
+    return ai_usage_events(db, store_id=store_id, day=day, limit=limit)
+
+
+@router.get("/operations/ai-usage/summary", response_model=AiUsageSummaryOut)
+def usage_summary(db: DbDep, store_id: StoreDep, day: str | None = Query(default=None)):
+    return ai_usage_summary(db, store_id=store_id, day=day)
 
 
 # ── Analytics ──────────────────────────────────────────────────────────────────

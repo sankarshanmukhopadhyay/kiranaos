@@ -1,5 +1,40 @@
 # Changelog
 
+## v2.4.0 - Release 2 Operations Release
+
+Release 2 moves KiranaOS from a pilot-safe order capture foundation into a daily merchant operations workflow. It adds catalog management, product substitutions, product binding on order items, repeat orders, customer history, staff assignment, daily operations reporting, feature flags, and AI usage tracking. It keeps the Release 1 safety posture intact: AI remains an intake/proposal layer, and operational authority stays with deterministic workflows and human review.
+
+### Added
+
+- Product catalog models, schemas, API endpoints, and audit events.
+- Product substitution records for operator-approved alternative fulfillment.
+- Optional product binding and item notes on order item corrections.
+- Repeat-order endpoint for fast reorder creation from prior customer orders.
+- Customer history endpoint with recent orders, lifetime totals, and top items.
+- Staff assignment lifecycle for fulfillment work allocation.
+- Order notes endpoint for operational delivery/packing instructions.
+- Feature flag endpoint and environment flags for catalog, staff assignment, repeat orders, AI usage tracking, delivery, and payments.
+- AI usage event recording and daily summary endpoints.
+- Operations daily report endpoint combining order, review, credit, item, and AI usage metrics.
+- Alembic migration `20260714_0100_release2_operations.py`.
+- Jekyll/GitHub Pages documentation site under `docs/`.
+- Release 2 adoption, operations, API, and testing documentation refresh.
+
+### Changed
+
+- Bumped backend, frontend, and API metadata to `2.4.0`.
+- Expanded daily closing output with pending, packed, and manual intervention metrics.
+- Extended frontend typed API client to cover Release 2 operations endpoints.
+- Updated `.env.example` with Release 2 feature flags.
+- Updated roadmap to make Release 2 the current completed operations milestone and Release 3 the next order-to-cash milestone.
+
+### Validation
+
+- `make test`: 63 backend tests passed.
+- `make lint`: passed.
+- `make typecheck`: passed, 32 backend source files.
+- `cd frontend && npm run build`: passed.
+
 ## v2.3.0 - Release 1 Commercial Foundation
 
 Release 1 stabilizes KiranaOS for controlled merchant pilots. It is intentionally scoped to repo health, provider correctness, ingestion safety, review/correction workflow, auth-enabled pilot UI, auditability, tests, and adoption documentation.
