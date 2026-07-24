@@ -113,6 +113,20 @@ for path in required:
     if not path.exists():
         errors.append(f"Missing required publishing artifact: {path.relative_to(ROOT)}")
 
+# Just The Docs imports this partial from its own stylesheet. The partial must
+# contain overrides only; importing the theme here creates a recursive or
+# unresolved Sass import under the GitHub Pages toolchain.
+custom_scss = DOCS / "_sass" / "custom" / "custom.scss"
+if not custom_scss.exists():
+    errors.append("Missing Just The Docs custom Sass partial: docs/_sass/custom/custom.scss")
+else:
+    custom_text = custom_scss.read_text(encoding="utf-8")
+    if "site.theme" in custom_text or re.search(r"@import\s+[\"']just-the-docs", custom_text):
+        errors.append(
+            "docs/_sass/custom/custom.scss: must contain overrides only; "
+            "do not import the Just The Docs theme from the custom partial"
+        )
+
 if errors:
     print("Documentation validation failed:")
     for error in errors:
