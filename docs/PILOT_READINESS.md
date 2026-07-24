@@ -1,7 +1,9 @@
 ---
-layout: page
+layout: default
 title: Pilot Readiness Checklist
-permalink: /pilot-readiness/
+parent: Guides
+nav_order: 4
+permalink: /guides/pilot-readiness/
 ---
 
 # Pilot Readiness Checklist

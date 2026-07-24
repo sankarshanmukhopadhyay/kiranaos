@@ -217,6 +217,23 @@ export interface Payment {
   reconciled_at: string | null;
 }
 
+
+export interface Settlement {
+  id: number;
+  store_id: number;
+  business_day: string;
+  cash_total: number;
+  upi_total: number;
+  refund_total: number;
+  net_total: number;
+  payment_count: number;
+  status: "draft" | "closed";
+  notes: string | null;
+  generated_at: string;
+  closed_at: string | null;
+  closed_by: string | null;
+}
+
 export interface Product {
   id: number;
   store_id: number;
@@ -400,6 +417,12 @@ export const api = {
   }),
 
   // Payments
+  manualPayment: (data: { order_id: number; amount: number; method: "cash" | "upi" | "split"; cash_amount?: number; upi_amount?: number; provider_ref?: string; payer_vpa?: string; notes?: string }) =>
+    req<Payment>("/api/payments/manual", { method: "POST", body: JSON.stringify(data) }),
+  settlements: () => req<Settlement[]>("/api/settlements"),
+  generateSettlement: (day?: string, notes?: string) => req<Settlement>("/api/settlements", { method: "POST", body: JSON.stringify({ day, notes }) }),
+  closeSettlement: (id: number, notes?: string) => req<Settlement>(`/api/settlements/${id}/close`, { method: "POST", body: JSON.stringify({ notes }) }),
+
   reconcileUpi: (data: {
     provider_ref: string; amount: number; payer_vpa?: string;
     customer_id?: number; order_id?: number; raw_payload?: Record<string, unknown>;

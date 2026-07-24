@@ -1,7 +1,9 @@
 ---
-layout: page
+layout: default
 title: Adoption Guide
-permalink: /adoption-guide/
+parent: Guides
+nav_order: 1
+permalink: /guides/adoption/
 ---
 
 # Adoption Guide

@@ -1,16 +1,53 @@
 title: KiranaOS Documentation
-description: WhatsApp-native merchant operations workflow for kirana and small-store pilots.
-theme: minima
-markdown: kramdown
+description: Governed merchant operations and Order-to-Cash infrastructure for kirana and small-store pilots.
+url: "https://sankarshanmukhopadhyay.github.io"
+baseurl: "/kiranaos"
+repository: sankarshanmukhopadhyay/kiranaos
+
+theme: just-the-docs
+color_scheme: light
+search_enabled: true
+heading_anchors: true
+permalink: pretty
+
+aux_links:
+  "KiranaOS on GitHub":
+    - "https://github.com/sankarshanmukhopadhyay/kiranaos"
+aux_links_new_tab: true
+
+nav_external_links:
+  - title: Repository
+    url: https://github.com/sankarshanmukhopadhyay/kiranaos
+    hide_icon: false
+
+back_to_top: true
+back_to_top_text: "Back to top"
+footer_content: "KiranaOS documentation. Published as executable operational guidance for governed merchant workflows."
+
+callouts:
+  note:
+    title: Note
+    color: blue
+  warning:
+    title: Warning
+    color: yellow
+  important:
+    title: Important
+    color: red
+
+kramdown:
+  input: GFM
+  syntax_highlighter: rouge
+
 plugins:
-  - jekyll-feed
-header_pages:
-  - index.md
-  - ADOPTION_GUIDE.md
-  - ARCHITECTURE.md
-  - API_GUIDE.md
-  - OPERATIONS.md
-  - TESTING.md
-  - RELEASE_NOTES_v2.4.0.md
+  - jekyll-seo-tag
+  - jekyll-sitemap
+
 exclude:
-  - .DS_Store
+  - Gemfile
+  - Gemfile.lock
+  - node_modules
+  - vendor
+  - README.md
+
+collections_dir: collections

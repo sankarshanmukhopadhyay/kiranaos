@@ -1,7 +1,9 @@
 ---
-layout: page
+layout: default
 title: Deployment Guide
-permalink: /deployment/
+parent: Guides
+nav_order: 2
+permalink: /guides/deployment/
 ---
 
 # Deployment Guide

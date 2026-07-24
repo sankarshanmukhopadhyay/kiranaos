@@ -1,7 +1,9 @@
 ---
-layout: page
-title: KiranaOS v2.4.0 Release Notes
-permalink: /release-notes-v2.4.0/
+layout: default
+title: v2.4.0 Release 2
+parent: Releases
+nav_order: 3
+permalink: /releases/v2.4.0/
 ---
 
 # KiranaOS v2.4.0 Release Notes

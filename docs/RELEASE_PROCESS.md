@@ -1,7 +1,9 @@
 ---
-layout: page
+layout: default
 title: Release Process
-permalink: /release-process/
+parent: Releases
+nav_order: 1
+permalink: /releases/process/
 ---
 
 # Release Process

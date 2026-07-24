@@ -76,8 +76,27 @@ class DeliveryStatus(StrEnum):
 class PaymentStatus(StrEnum):
     received   = "received"
     reconciled = "reconciled"
+    partially_refunded = "partially_refunded"
+    refunded = "refunded"
     duplicate  = "duplicate"
     failed     = "failed"
+
+
+class PaymentMethod(StrEnum):
+    cash = "cash"
+    upi = "upi"
+    split = "split"
+
+
+class RefundStatus(StrEnum):
+    requested = "requested"
+    approved = "approved"
+    rejected = "rejected"
+
+
+class SettlementStatus(StrEnum):
+    draft = "draft"
+    closed = "closed"
 
 
 class ProductStatus(StrEnum):
@@ -121,6 +140,14 @@ class AuditAction(StrEnum):
     order_note_updated = "order_note_updated"
     repeat_order_created = "repeat_order_created"
     ai_usage_recorded = "ai_usage_recorded"
+    payment_recorded = "payment_recorded"
+    refund_requested = "refund_requested"
+    refund_approved = "refund_approved"
+    refund_rejected = "refund_rejected"
+    order_cancelled_financially = "order_cancelled_financially"
+    settlement_generated = "settlement_generated"
+    settlement_closed = "settlement_closed"
+    accounting_export_generated = "accounting_export_generated"
 
 
 # ── Store / tenancy ───────────────────────────────────────────────────────────
@@ -423,11 +450,54 @@ class Payment(Base):
     payer_vpa:      Mapped[str | None]    = mapped_column(String(160), nullable=True)
     status:         Mapped[PaymentStatus] = mapped_column(Enum(PaymentStatus), default=PaymentStatus.received)
     raw_payload:    Mapped[str | None]    = mapped_column(Text, nullable=True)
+    method:         Mapped[PaymentMethod] = mapped_column(Enum(PaymentMethod), default=PaymentMethod.upi, index=True)
+    cash_amount:    Mapped[float]         = mapped_column(Float, default=0.0)
+    upi_amount:     Mapped[float]         = mapped_column(Float, default=0.0)
+    refunded_amount: Mapped[float]        = mapped_column(Float, default=0.0)
+    notes:          Mapped[str | None]    = mapped_column(Text, nullable=True)
     received_at:    Mapped[datetime]      = mapped_column(DateTime(timezone=True), default=utcnow)
     reconciled_at:  Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     customer: Mapped[Customer | None] = relationship()
     order: Mapped[Order | None] = relationship(back_populates="payments")
+    refunds: Mapped[list["Refund"]] = relationship(back_populates="payment")
+
+
+class Refund(Base):
+    __tablename__ = "refunds"
+
+    id:          Mapped[int]          = mapped_column(Integer, primary_key=True)
+    store_id:    Mapped[int]          = mapped_column(ForeignKey("stores.id"), default=1, index=True)
+    payment_id:  Mapped[int]          = mapped_column(ForeignKey("payments.id"), index=True)
+    order_id:    Mapped[int | None]   = mapped_column(ForeignKey("orders.id"), nullable=True, index=True)
+    amount:      Mapped[float]        = mapped_column(Float)
+    reason:      Mapped[str]          = mapped_column(String(240))
+    status:      Mapped[RefundStatus] = mapped_column(Enum(RefundStatus), default=RefundStatus.requested, index=True)
+    requested_by: Mapped[str | None]  = mapped_column(String(120), nullable=True)
+    decided_by:  Mapped[str | None]   = mapped_column(String(120), nullable=True)
+    requested_at: Mapped[datetime]    = mapped_column(DateTime(timezone=True), default=utcnow)
+    decided_at:  Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    payment: Mapped[Payment] = relationship(back_populates="refunds")
+
+
+class DailySettlement(Base):
+    __tablename__ = "daily_settlements"
+    __table_args__ = (UniqueConstraint("store_id", "business_day", name="uq_settlement_store_day"),)
+
+    id:           Mapped[int]              = mapped_column(Integer, primary_key=True)
+    store_id:     Mapped[int]              = mapped_column(ForeignKey("stores.id"), default=1, index=True)
+    business_day: Mapped[str]              = mapped_column(String(10), index=True)
+    cash_total:   Mapped[float]            = mapped_column(Float, default=0.0)
+    upi_total:    Mapped[float]            = mapped_column(Float, default=0.0)
+    refund_total: Mapped[float]            = mapped_column(Float, default=0.0)
+    net_total:    Mapped[float]            = mapped_column(Float, default=0.0)
+    payment_count: Mapped[int]             = mapped_column(Integer, default=0)
+    status:       Mapped[SettlementStatus] = mapped_column(Enum(SettlementStatus), default=SettlementStatus.draft, index=True)
+    notes:        Mapped[str | None]       = mapped_column(Text, nullable=True)
+    generated_at: Mapped[datetime]         = mapped_column(DateTime(timezone=True), default=utcnow)
+    closed_at:    Mapped[datetime | None]  = mapped_column(DateTime(timezone=True), nullable=True)
+    closed_by:    Mapped[str | None]       = mapped_column(String(120), nullable=True)
 
 
 class AuditEvent(Base):

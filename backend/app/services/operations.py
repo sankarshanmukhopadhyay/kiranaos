@@ -18,6 +18,7 @@ from app.models.domain import (
     OutboundMessage,
     OutboundStatus,
     Payment,
+    PaymentMethod,
     PaymentStatus,
 )
 from app.schemas.domain import (
@@ -344,6 +345,9 @@ def reconcile_upi_payment(db: Session, store_id: int, payload: UpiWebhookIn) -> 
         order_id=payload.order_id,
         provider_ref=payload.provider_ref,
         amount=payload.amount,
+        method=PaymentMethod.upi,
+        cash_amount=0.0,
+        upi_amount=payload.amount,
         payer_vpa=payload.payer_vpa,
         raw_payload=json.dumps(payload.raw_payload or {}, sort_keys=True),
         status=PaymentStatus.received,

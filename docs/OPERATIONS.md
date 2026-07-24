@@ -1,7 +1,9 @@
 ---
-layout: page
+layout: default
 title: Operations Guide
-permalink: /operations/
+parent: Operations
+nav_order: 1
+permalink: /operations/daily/
 ---
 
 # Operations Guide

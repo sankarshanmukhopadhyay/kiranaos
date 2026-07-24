@@ -1,7 +1,9 @@
 ---
-layout: page
+layout: default
 title: Testing Guide
-permalink: /testing/
+parent: Technical Reference
+nav_order: 4
+permalink: /reference/testing/
 ---
 
 # Testing Guide

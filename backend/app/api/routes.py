@@ -52,7 +52,15 @@ from app.schemas.domain import (
     OrderReviewResolveIn,
     OutboundConfirmationIn,
     OutboundMessageOut,
+    ManualPaymentIn,
+    OrderPaymentSummaryOut,
     PaymentOut,
+    RefundDecisionIn,
+    RefundOut,
+    RefundRequestIn,
+    SettlementCloseIn,
+    SettlementGenerateIn,
+    SettlementOut,
     ProductCreateIn,
     ProductOut,
     ProductStatus,
@@ -84,6 +92,17 @@ from app.services.auth import (
     ensure_default_store,
     operator_count,
     require_roles,
+)
+from app.services.finance import (
+    cancel_order_financially,
+    close_settlement,
+    decide_refund,
+    export_accounting,
+    generate_settlement,
+    list_settlements,
+    order_payment_summary,
+    record_manual_payment,
+    request_refund,
 )
 from app.services.ingestion import (
     _is_dormant,
@@ -694,6 +713,71 @@ async def upi_webhook(
         return reconcile_upi_payment(db, store_id, payload)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/payments/manual", response_model=PaymentOut, status_code=201)
+def manual_payment(payload: ManualPaymentIn, db: DbDep, store_id: StoreDep, operator: ManagerDep):
+    try:
+        return record_manual_payment(db, store_id, payload, operator)
+    except ValueError as exc:
+        raise HTTPException(status_code=400 if "not found" not in str(exc) else 404, detail=str(exc)) from exc
+
+
+@router.get("/orders/{order_id}/payments/summary", response_model=OrderPaymentSummaryOut)
+def payment_summary(order_id: int, db: DbDep, store_id: StoreDep, _operator: StaffDep):
+    try:
+        return order_payment_summary(db, store_id, order_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/refunds", response_model=RefundOut, status_code=201)
+def create_refund(payload: RefundRequestIn, db: DbDep, store_id: StoreDep, operator: ManagerDep):
+    try:
+        return request_refund(db, store_id, payload, operator)
+    except ValueError as exc:
+        raise HTTPException(status_code=400 if "not found" not in str(exc) else 404, detail=str(exc)) from exc
+
+
+@router.post("/refunds/{refund_id}/decision", response_model=RefundOut)
+def refund_decision(refund_id: int, payload: RefundDecisionIn, db: DbDep, store_id: StoreDep, operator: OwnerDep):
+    try:
+        return decide_refund(db, store_id, refund_id, payload.approve, payload.notes, operator)
+    except ValueError as exc:
+        raise HTTPException(status_code=400 if "not found" not in str(exc) else 404, detail=str(exc)) from exc
+
+
+@router.post("/orders/{order_id}/financial-cancellation", response_model=OrderOut)
+def financial_cancellation(order_id: int, payload: RefundDecisionIn, db: DbDep, store_id: StoreDep, operator: ManagerDep):
+    reason = payload.notes or "Cancelled by operator"
+    try:
+        return cancel_order_financially(db, store_id, order_id, reason, operator)
+    except ValueError as exc:
+        raise HTTPException(status_code=400 if "not found" not in str(exc) else 404, detail=str(exc)) from exc
+
+
+@router.post("/settlements", response_model=SettlementOut, status_code=201)
+def create_settlement(payload: SettlementGenerateIn, db: DbDep, store_id: StoreDep, operator: ManagerDep):
+    return generate_settlement(db, store_id, payload.day, payload.notes, operator)
+
+
+@router.get("/settlements", response_model=list[SettlementOut])
+def settlements(db: DbDep, store_id: StoreDep, _operator: ManagerDep):
+    return list_settlements(db, store_id)
+
+
+@router.post("/settlements/{settlement_id}/close", response_model=SettlementOut)
+def settlement_close(settlement_id: int, payload: SettlementCloseIn, db: DbDep, store_id: StoreDep, operator: OwnerDep):
+    try:
+        return close_settlement(db, store_id, settlement_id, payload.notes, operator)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/accounting/export")
+def accounting_export(db: DbDep, store_id: StoreDep, _operator: ManagerDep, day: str | None = Query(default=None), format: str = Query(default="csv", pattern="^(csv|xlsx)$")):
+    content, media_type, filename = export_accounting(db, store_id, day, format)
+    return Response(content=content, media_type=media_type, headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 
 # ── Audit ───────────────────────────────────────────────────────────────────

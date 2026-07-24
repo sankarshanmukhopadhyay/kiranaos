@@ -642,3 +642,49 @@ def test_order_notes_ai_usage_and_operations_daily_report():
     assert body["orders_created"] >= 1
     assert "average_order_value" in body
     assert body["ai_usage_count"] >= 1
+
+
+# ── Release 3 order-to-cash ──────────────────────────────────────────────────
+
+def _order_with_amount(amount=500.0):
+    order = client.post("/api/ingest/messages", json={"phone": "+919900000301", "text": "rice"}).json()
+    client.patch(f"/api/orders/{order['id']}/amount", json={"amount_due": amount, "is_credit": False})
+    return order["id"]
+
+def test_manual_split_payment_and_summary():
+    order_id = _order_with_amount()
+    payment = client.post("/api/payments/manual", json={"order_id": order_id, "amount": 500, "method": "split", "cash_amount": 200, "upi_amount": 300, "provider_ref": "upi-r3-1"})
+    assert payment.status_code == 201
+    assert payment.json()["cash_amount"] == 200
+    summary = client.get(f"/api/orders/{order_id}/payments/summary").json()
+    assert summary["status"] == "paid"
+    assert summary["outstanding"] == 0
+
+def test_refund_requires_decision_and_updates_payment():
+    order_id = _order_with_amount(300)
+    payment = client.post("/api/payments/manual", json={"order_id": order_id, "amount": 300, "method": "cash"}).json()
+    refund = client.post("/api/refunds", json={"payment_id": payment["id"], "amount": 100, "reason": "Item unavailable"})
+    assert refund.status_code == 201 and refund.json()["status"] == "requested"
+    decided = client.post(f"/api/refunds/{refund.json()['id']}/decision", json={"approve": True, "notes": "Cash returned"})
+    assert decided.json()["status"] == "approved"
+    summary = client.get(f"/api/orders/{order_id}/payments/summary").json()
+    assert summary["refunded_total"] == 100
+    assert summary["outstanding"] == 100
+
+def test_daily_settlement_and_accounting_exports():
+    order_id = _order_with_amount(125)
+    client.post("/api/payments/manual", json={"order_id": order_id, "amount": 125, "method": "cash"})
+    settlement = client.post("/api/settlements", json={}).json()
+    assert settlement["cash_total"] == 125
+    assert settlement["net_total"] == 125
+    closed = client.post(f"/api/settlements/{settlement['id']}/close", json={"notes": "Till verified"})
+    assert closed.json()["status"] == "closed"
+    csv_res = client.get("/api/accounting/export?format=csv")
+    assert csv_res.status_code == 200 and "gross_amount" in csv_res.text
+    xlsx_res = client.get("/api/accounting/export?format=xlsx")
+    assert xlsx_res.status_code == 200 and xlsx_res.content[:2] == b"PK"
+
+def test_payment_cannot_exceed_outstanding():
+    order_id = _order_with_amount(100)
+    res = client.post("/api/payments/manual", json={"order_id": order_id, "amount": 101, "method": "cash"})
+    assert res.status_code == 400

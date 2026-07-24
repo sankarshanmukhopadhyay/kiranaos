@@ -18,7 +18,10 @@ from app.models.domain import (
     OrderStatus,
     OutboundStatus,
     ParseStatus,
+    PaymentMethod,
     PaymentStatus,
+    RefundStatus,
+    SettlementStatus,
     ProductStatus,
     StaffAssignmentStatus,
 )
@@ -495,6 +498,82 @@ class UpiWebhookIn(BaseModel):
     raw_payload: dict | None = None
 
 
+class ManualPaymentIn(BaseModel):
+    order_id: int
+    amount: float = Field(..., gt=0)
+    method: PaymentMethod
+    cash_amount: float = Field(default=0.0, ge=0)
+    upi_amount: float = Field(default=0.0, ge=0)
+    provider_ref: str | None = Field(default=None, max_length=160)
+    payer_vpa: str | None = Field(default=None, max_length=160)
+    notes: str | None = Field(default=None, max_length=500)
+
+
+class RefundRequestIn(BaseModel):
+    payment_id: int
+    amount: float = Field(..., gt=0)
+    reason: str = Field(..., min_length=3, max_length=240)
+
+
+class RefundDecisionIn(BaseModel):
+    approve: bool
+    notes: str | None = Field(default=None, max_length=240)
+
+
+class RefundOut(BaseModel):
+    id: int
+    store_id: int
+    payment_id: int
+    order_id: int | None
+    amount: float
+    reason: str
+    status: RefundStatus
+    requested_by: str | None
+    decided_by: str | None
+    requested_at: datetime
+    decided_at: datetime | None
+
+    model_config = {"from_attributes": True}
+
+
+class SettlementGenerateIn(BaseModel):
+    day: str | None = None
+    notes: str | None = Field(default=None, max_length=500)
+
+
+class SettlementCloseIn(BaseModel):
+    notes: str | None = Field(default=None, max_length=500)
+
+
+class SettlementOut(BaseModel):
+    id: int
+    store_id: int
+    business_day: str
+    cash_total: float
+    upi_total: float
+    refund_total: float
+    net_total: float
+    payment_count: int
+    status: SettlementStatus
+    notes: str | None
+    generated_at: datetime
+    closed_at: datetime | None
+    closed_by: str | None
+
+    model_config = {"from_attributes": True}
+
+
+class OrderPaymentSummaryOut(BaseModel):
+    order_id: int
+    amount_due: float
+    paid_total: float
+    refunded_total: float
+    net_paid: float
+    outstanding: float
+    status: str
+    payments: list["PaymentOut"]
+
+
 class PaymentOut(BaseModel):
     id:            int
     store_id:      int
@@ -505,6 +584,11 @@ class PaymentOut(BaseModel):
     amount:        float
     payer_vpa:     str | None
     status:        PaymentStatus
+    method:        PaymentMethod
+    cash_amount:   float
+    upi_amount:    float
+    refunded_amount: float
+    notes:         str | None
     received_at:   datetime
     reconciled_at: datetime | None
 

@@ -1,3 +1,14 @@
+---
+layout: default
+title: Project Overview
+parent: Project Governance
+nav_order: 1
+permalink: /project/overview/
+source_file: /README.md
+---
+
+<div class="source-banner">Canonical repository source: <code>README.md</code></div>
+
 # KiranaOS
 
 **WhatsApp-native order capture and daily merchant operations for kirana stores and small businesses.**
@@ -290,7 +301,7 @@ The v2.5.0 Release 3 Order-to-Cash release adds governed financial execution:
 - CSV and XLSX exports for accountant and POS handoff;
 - store-scoped audit evidence for sensitive financial mutations.
 
-See [`docs/RELEASE_NOTES_v2.5.0.md`](docs/RELEASE_NOTES_v2.5.0.md) and [`docs/ORDER_TO_CASH.md`](docs/ORDER_TO_CASH.md).
+See [`docs/RELEASE_NOTES_v2.5.0.md`](https://github.com/sankarshanmukhopadhyay/kiranaos/blob/main/docs/RELEASE_NOTES_v2.5.0.md) and [`docs/ORDER_TO_CASH.md`](https://github.com/sankarshanmukhopadhyay/kiranaos/blob/main/docs/ORDER_TO_CASH.md).
 
 ### v2.4.0 Operations Release
 
@@ -307,13 +318,13 @@ The v2.4.0 Release 2 Operations Release turns the Release 1 foundation into a da
 - feature flags for operations capabilities;
 - AI usage tracking for provider cost and reliability evidence.
 
-See [`docs/RELEASE_NOTES_v2.4.0.md`](docs/RELEASE_NOTES_v2.4.0.md) for full release notes.
+See [`docs/RELEASE_NOTES_v2.4.0.md`](https://github.com/sankarshanmukhopadhyay/kiranaos/blob/main/docs/RELEASE_NOTES_v2.4.0.md) for full release notes.
 
 ### v2.3.0 Commercial Foundation Release
 
 The v2.3.0 Release 1 Commercial Foundation release stabilized KiranaOS for controlled merchant pilots with provider correctness, ingestion safety, review/correction workflow, auth-enabled pilot UI, auditability, tests, and adoption documentation.
 
-See [`docs/RELEASE_NOTES_v2.3.0.md`](docs/RELEASE_NOTES_v2.3.0.md) for full release notes.
+See [`docs/RELEASE_NOTES_v2.3.0.md`](https://github.com/sankarshanmukhopadhyay/kiranaos/blob/main/docs/RELEASE_NOTES_v2.3.0.md) for full release notes.
 
 ### Security hardening
 
@@ -328,11 +339,11 @@ The v2.1.1 hardening release closes the main red-team findings from the operatio
 - CORS no longer defaults to wildcard credentials;
 - UPI duplicate detection is scoped by store to avoid cross-tenant leakage.
 
-See [`SECURITY.md`](SECURITY.md) for the production checklist and trust-boundary details.
+See [`SECURITY.md`](https://github.com/sankarshanmukhopadhyay/kiranaos/blob/main/SECURITY.md) for the production checklist and trust-boundary details.
 
 ## Roadmap
 
-See [`ROADMAP.md`](ROADMAP.md) for the current commercial maturity roadmap.
+See [`ROADMAP.md`](https://github.com/sankarshanmukhopadhyay/kiranaos/blob/main/ROADMAP.md) for the current commercial maturity roadmap.
 
 - [x] Release 1 Commercial Foundation: repo health, provider correctness, review workflow, auth-enabled pilot UI, auditability, tests, and adoption documentation
 - [x] Release 2 Operations: catalog, substitutions, repeat orders, customer history, staff assignment, AI usage tracking, and daily operations reporting
@@ -352,16 +363,16 @@ See [`ROADMAP.md`](ROADMAP.md) for the current commercial maturity roadmap.
 
 The complete documentation set is publishable through GitHub Pages using the Just The Docs theme. It includes guided adoption, technical reference, operations, release, and project-governance sections.
 
-- [`docs/index.md`](docs/index.md) — guided documentation home
-- [`docs/ADOPTION_GUIDE.md`](docs/ADOPTION_GUIDE.md)
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
-- [`docs/API_GUIDE.md`](docs/API_GUIDE.md)
-- [`docs/OPERATIONS.md`](docs/OPERATIONS.md)
-- [`docs/ORDER_TO_CASH.md`](docs/ORDER_TO_CASH.md)
-- [`docs/SECURITY_MODEL.md`](docs/SECURITY_MODEL.md)
-- [`docs/TESTING.md`](docs/TESTING.md)
-- [`docs/RELEASE_NOTES_v2.5.0.md`](docs/RELEASE_NOTES_v2.5.0.md)
-- [`docs/JEKYLL_GITHUB_PAGES.md`](docs/JEKYLL_GITHUB_PAGES.md) — publishing and validation instructions
+- [`docs/index.md`](https://github.com/sankarshanmukhopadhyay/kiranaos/blob/main/docs/index.md) — guided documentation home
+- [`docs/ADOPTION_GUIDE.md`](https://github.com/sankarshanmukhopadhyay/kiranaos/blob/main/docs/ADOPTION_GUIDE.md)
+- [`docs/ARCHITECTURE.md`](https://github.com/sankarshanmukhopadhyay/kiranaos/blob/main/docs/ARCHITECTURE.md)
+- [`docs/API_GUIDE.md`](https://github.com/sankarshanmukhopadhyay/kiranaos/blob/main/docs/API_GUIDE.md)
+- [`docs/OPERATIONS.md`](https://github.com/sankarshanmukhopadhyay/kiranaos/blob/main/docs/OPERATIONS.md)
+- [`docs/ORDER_TO_CASH.md`](https://github.com/sankarshanmukhopadhyay/kiranaos/blob/main/docs/ORDER_TO_CASH.md)
+- [`docs/SECURITY_MODEL.md`](https://github.com/sankarshanmukhopadhyay/kiranaos/blob/main/docs/SECURITY_MODEL.md)
+- [`docs/TESTING.md`](https://github.com/sankarshanmukhopadhyay/kiranaos/blob/main/docs/TESTING.md)
+- [`docs/RELEASE_NOTES_v2.5.0.md`](https://github.com/sankarshanmukhopadhyay/kiranaos/blob/main/docs/RELEASE_NOTES_v2.5.0.md)
+- [`docs/JEKYLL_GITHUB_PAGES.md`](https://github.com/sankarshanmukhopadhyay/kiranaos/blob/main/docs/JEKYLL_GITHUB_PAGES.md) — publishing and validation instructions
 
 Run `python scripts/validate_docs.py` before committing documentation changes.
 

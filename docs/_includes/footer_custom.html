@@ -1,0 +1,13 @@
+<script>
+window.addEventListener("DOMContentLoaded", () => {
+  const links = [...document.querySelectorAll(".site-nav a.nav-list-link")].filter(a => !a.closest(".nav-list-expander"));
+  const current = links.findIndex(a => a.classList.contains("active"));
+  if (current < 0) return;
+  const wrap = document.createElement("nav");
+  wrap.className = "page-sequence";
+  wrap.setAttribute("aria-label", "Documentation sequence");
+  if (current > 0) { const a = links[current-1].cloneNode(true); a.textContent = "← Previous: " + a.textContent.trim(); wrap.appendChild(a); }
+  if (current < links.length-1) { const a = links[current+1].cloneNode(true); a.textContent = "Next: " + a.textContent.trim() + " →"; wrap.appendChild(a); }
+  document.querySelector("main")?.appendChild(wrap);
+});
+</script>

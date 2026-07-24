@@ -1,3 +1,14 @@
+---
+layout: default
+title: Roadmap
+parent: Project Governance
+nav_order: 2
+permalink: /project/roadmap/
+source_file: /ROADMAP.md
+---
+
+<div class="source-banner">Canonical repository source: <code>ROADMAP.md</code></div>
+
 # KiranaOS Roadmap
 
 KiranaOS follows a commercially sequenced roadmap. Each release must strengthen adoption, daily retention, or monetization evidence without turning AI into an uncontrolled authority layer.
@@ -56,3 +67,4 @@ Release 4 should focus on controlled integrations and repeatable commercial depl
 - Advanced dynamic pricing.
 - Marketplace orchestration.
 - Distributor monetization before store operations and order-to-cash evidence are stable.
+

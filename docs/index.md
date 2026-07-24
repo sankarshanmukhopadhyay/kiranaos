@@ -1,32 +1,33 @@
 ---
-layout: page
-title: KiranaOS Documentation
+layout: home
+title: Home
+nav_order: 1
 permalink: /
 ---
 
 # KiranaOS Documentation
 
-KiranaOS is a WhatsApp-native merchant operations workflow for kirana stores, restaurants, pharmacies, bakeries, cloud kitchens, and other small businesses that receive messy customer orders through chat, voice, and images.
+KiranaOS is a WhatsApp-native merchant operating system for small businesses that receive orders through chat, voice, and images. The documentation treats each workflow as an auditable control surface: who may act, what scope applies, what evidence is produced, and how authority can be reviewed or revoked.
 
 ## Current release
 
-**v2.4.0 Release 2 Operations Release** adds catalog management, substitutions, repeat orders, customer history, staff assignment, AI usage tracking, and daily operations reporting.
+**v2.5.0, Release 3 Order-to-Cash**, adds tender-aware cash, UPI, and split payments; controlled refunds and cancellations; closeable daily settlements; and accountant-ready CSV/XLSX exports.
 
-Start here:
+[Start the adoption path]({% link ADOPTION_GUIDE.md %}){: .btn .btn-primary }
+[Review Order-to-Cash]({% link ORDER_TO_CASH.md %}){: .btn }
 
-- [Adoption Guide](ADOPTION_GUIDE.md)
-- [Architecture](ARCHITECTURE.md)
-- [API Guide](API_GUIDE.md)
-- [Operations Guide](OPERATIONS.md)
-- [Release 2 Operations Guide](OPERATIONS_RELEASE.md)
-- [Testing](TESTING.md)
-- [Deployment](DEPLOYMENT.md)
-- [Security Model](SECURITY_MODEL.md)
-- [Release Notes v2.4.0](RELEASE_NOTES_v2.4.0.md)
-- [GitHub Pages/Jekyll](JEKYLL_GITHUB_PAGES.md)
+## Guided learning path
+
+1. **Evaluate:** [Adoption Guide]({% link ADOPTION_GUIDE.md %}) and [Pilot Readiness]({% link PILOT_READINESS.md %}).
+2. **Understand:** [Architecture]({% link ARCHITECTURE.md %}), [API Guide]({% link API_GUIDE.md %}), and [Security Model]({% link SECURITY_MODEL.md %}).
+3. **Operate:** [Daily Operations]({% link OPERATIONS.md %}) and [Order-to-Cash]({% link ORDER_TO_CASH.md %}).
+4. **Assure:** [Testing]({% link TESTING.md %}), [Release Process]({% link RELEASE_PROCESS.md %}), and [Security Policy]({% link project/security.md %}).
+5. **Track maturity:** [Roadmap]({% link project/roadmap.md %}) and [Changelog]({% link project/changelog.md %}).
 
 ## Release sequence
 
-1. **Release 1 Commercial Foundation:** provider correctness, ingestion safety, review/correction workflow, auth-enabled pilot UI, auditability, and adoption documentation.
-2. **Release 2 Operations:** catalog, substitutions, repeat orders, customer history, staff assignment, daily operations reporting, feature flags, and AI usage evidence.
-3. **Release 3 Order-to-Cash:** payment status depth, reconciliation, refunds/cancellations, settlement, export, and monetization evidence.
+| Release | Outcome | Evidence surface |
+|---|---|---|
+| Release 1 | Commercial foundation | Safe ingestion, review, authentication, auditability |
+| Release 2 | Store operations | Catalog, fulfilment, assignments, daily reporting |
+| Release 3 | Order-to-Cash | Payments, refunds, settlements, accounting exports |

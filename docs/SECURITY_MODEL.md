@@ -1,7 +1,9 @@
 ---
-layout: page
+layout: default
 title: Security Model
-permalink: /security-model/
+parent: Technical Reference
+nav_order: 3
+permalink: /reference/security-model/
 ---
 
 # Security Model

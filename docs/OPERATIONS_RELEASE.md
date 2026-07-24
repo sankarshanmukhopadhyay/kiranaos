@@ -1,7 +1,9 @@
 ---
-layout: page
+layout: default
 title: Release 2 Operations Guide
-permalink: /operations-release/
+parent: Operations
+nav_order: 2
+permalink: /operations/release-2/
 ---
 
 # Release 2 Operations Guide

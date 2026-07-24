@@ -1,3 +1,14 @@
+---
+layout: default
+title: Changelog
+parent: Project Governance
+nav_order: 3
+permalink: /project/changelog/
+source_file: /CHANGELOG.md
+---
+
+<div class="source-banner">Canonical repository source: <code>CHANGELOG.md</code></div>
+
 # Changelog
 
 ## v2.5.0 - Release 3 Order-to-Cash Release
@@ -113,3 +124,4 @@ Release 1 stabilizes KiranaOS for controlled merchant pilots. It is intentionall
 - Added role-based authority across owner, manager, and staff workflows.
 - Added audit events for order, credit, outbound, delivery, route, and payment mutations.
 - Bumped backend, frontend, and API metadata to `2.2.0`.
+

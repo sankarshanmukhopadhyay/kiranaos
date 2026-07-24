@@ -1,7 +1,9 @@
 ---
-layout: page
+layout: default
 title: AI Providers
-permalink: /ai-providers/
+parent: Guides
+nav_order: 3
+permalink: /guides/ai-providers/
 ---
 
 # AI Providers

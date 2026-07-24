@@ -1,7 +1,9 @@
 ---
-layout: page
+layout: default
 title: Architecture
-permalink: /architecture/
+parent: Technical Reference
+nav_order: 1
+permalink: /reference/architecture/
 ---
 
 # Architecture

@@ -6,7 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     app_name:               str  = "KiranaOS"
-    app_version:            str  = "2.4.0"
+    app_version:            str  = "2.5.0"
     database_url:           str  = "sqlite:///./data/kiranaos.db"
     default_store_id:        int  = 1
     whatsapp_verify_token:  str  = "change-me-before-deploy"

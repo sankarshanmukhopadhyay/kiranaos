@@ -1,7 +1,9 @@
 ---
-layout: page
+layout: default
 title: API Guide
-permalink: /api-guide/
+parent: Technical Reference
+nav_order: 2
+permalink: /reference/api/
 ---
 
 # API Guide

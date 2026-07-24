@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import "./styles.css";
-import { api, AuditEvent, Customer, DailyClosing, DashboardSummary, getAuthToken, Order, OrderStatus, Store } from "./lib/api";
+import { api, AuditEvent, Customer, DailyClosing, DashboardSummary, getAuthToken, Order, OrderStatus, Settlement, Store } from "./lib/api";
 
-type View = "dashboard" | "review" | "customers" | "closing";
+type View = "dashboard" | "review" | "customers" | "closing" | "finance";
 
 const EMPTY_SUMMARY: DashboardSummary = {
   pending: 0,
@@ -28,6 +28,7 @@ function App() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [store, setStore] = useState<Store | null>(null);
   const [closing, setClosing] = useState<DailyClosing | null>(null);
+  const [settlements, setSettlements] = useState<Settlement[]>([]);
   const [selected, setSelected] = useState<Order | null>(null);
   const [audit, setAudit] = useState<AuditEvent[]>([]);
   const [filter, setFilter] = useState<OrderStatus | "all">("all");
@@ -56,6 +57,7 @@ function App() {
       setCustomers(nextCustomers);
       setStore(nextStore);
       setClosing(nextClosing);
+      try { setSettlements(await api.settlements()); } catch { setSettlements([]); }
     } catch (err) {
       setError(String(err));
     }
@@ -158,6 +160,7 @@ function App() {
             ["review", `Review Queue (${summary.needs_review})`],
             ["customers", "Customers"],
             ["closing", "Daily Closing"],
+            ["finance", "Order-to-Cash"],
           ] as const).map(([key, label]) => (
             <button key={key} className={`sidebar-item${view === key ? " active" : ""}`} onClick={() => setView(key)}>
               <span>•</span>{label}
@@ -220,6 +223,26 @@ function App() {
                     </tr>
                   ))}</tbody>
                 </table>
+              </div>
+            </section>
+          )}
+
+          {view === "finance" && (
+            <section className="view-inner">
+              <Header title="Order-to-Cash" subtitle="Tender reconciliation, settlement closure, and accounting handoff" action={<button className="btn btn-saffron" onClick={async () => { try { await api.generateSettlement(); showToast("Settlement generated"); await refresh(); } catch (err) { showToast(`Settlement failed: ${err}`); } }}>Generate settlement</button>} />
+              <div className="udhaari-summary-grid">
+                <ClosingCard label="Cash" value={`₹${(settlements[0]?.cash_total ?? 0).toFixed(0)}`} />
+                <ClosingCard label="UPI" value={`₹${(settlements[0]?.upi_total ?? 0).toFixed(0)}`} />
+                <ClosingCard label="Refunds" value={`₹${(settlements[0]?.refund_total ?? 0).toFixed(0)}`} />
+                <ClosingCard label="Net Receipts" value={`₹${(settlements[0]?.net_total ?? 0).toFixed(0)}`} />
+              </div>
+              <div className="orders-toolbar">
+                <a className="btn btn-saffron" href="/api/accounting/export?format=csv">Export CSV</a>
+                <a className="btn" href="/api/accounting/export?format=xlsx">Export XLSX</a>
+              </div>
+              <div className="table-wrapper">
+                <table className="customer-table"><thead><tr><th>Day</th><th>Payments</th><th>Cash</th><th>UPI</th><th>Refunds</th><th>Net</th><th>Status</th></tr></thead>
+                <tbody>{settlements.map((row) => <tr key={row.id}><td>{row.business_day}</td><td>{row.payment_count}</td><td>₹{row.cash_total.toFixed(0)}</td><td>₹{row.upi_total.toFixed(0)}</td><td>₹{row.refund_total.toFixed(0)}</td><td>₹{row.net_total.toFixed(0)}</td><td>{row.status}</td></tr>)}</tbody></table>
               </div>
             </section>
           )}

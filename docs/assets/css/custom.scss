@@ -1,0 +1,8 @@
+---
+---
+@import "{{ site.theme }}";
+
+.page-sequence { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid $border-color; display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+.page-sequence a:last-child { margin-left: auto; }
+.source-banner { margin: 0 0 1.5rem; padding: .75rem 1rem; border-left: 4px solid $link-color; background: $sidebar-color; font-size: .9rem; }
+.mermaid { overflow-x: auto; margin: 1.5rem 0; text-align: center; }
