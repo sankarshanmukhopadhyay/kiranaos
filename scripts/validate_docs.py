@@ -21,6 +21,21 @@ errors: list[str] = []
 pages: dict[str, Path] = {}
 parents: set[str] = set()
 
+# Generated and third-party trees are not repository documentation.
+IGNORED_PARTS = {"_site", ".bundle", "vendor", "node_modules", ".jekyll-cache"}
+
+
+def documentation_pages() -> list[Path]:
+    """Return only source Markdown pages owned by this repository."""
+    return [
+        path
+        for path in sorted(DOCS.rglob("*.md"))
+        if not any(part in IGNORED_PARTS for part in path.relative_to(DOCS).parts)
+    ]
+
+
+DOC_PAGES = documentation_pages()
+
 
 def front_matter(path: Path) -> tuple[dict[str, str], str]:
     text = path.read_text(encoding="utf-8")
@@ -40,7 +55,7 @@ def front_matter(path: Path) -> tuple[dict[str, str], str]:
     return data, text[end + 5 :]
 
 
-for path in sorted(DOCS.rglob("*.md")):
+for path in DOC_PAGES:
     meta, body = front_matter(path)
     title = meta.get("title")
     if not title:
@@ -62,7 +77,7 @@ for title, path in pages.items():
 
 # Markdown links under docs must resolve unless they are external, anchors, Liquid links, or API examples.
 link_re = re.compile(r"(?<!!)\[[^\]]+\]\(([^)]+)\)")
-for path in sorted(DOCS.rglob("*.md")):
+for path in DOC_PAGES:
     _, body = front_matter(path)
     for raw in link_re.findall(body):
         target = raw.split()[0].strip("<>")
