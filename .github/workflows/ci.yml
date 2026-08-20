@@ -1,0 +1,76 @@
+name: Verify KiranaOS prototype
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend quality and tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+      - name: Install backend
+        working-directory: backend
+        run: pip install --no-build-isolation -e ".[dev]"
+      - name: Lint
+        working-directory: backend
+        run: ruff check app tests
+      - name: Type check
+        working-directory: backend
+        run: mypy app
+      - name: Test
+        working-directory: backend
+        env:
+          KIRANA_DEMO_MODE: "true"
+          KIRANA_AUTH_REQUIRED: "false"
+          KIRANA_STT_PROVIDER: none
+          KIRANA_OCR_PROVIDER: none
+          KIRANA_PARSER_AI_PROVIDER: none
+        run: pytest -v
+
+  frontend:
+    name: Frontend lint and build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend
+        working-directory: frontend
+        run: npm ci
+      - name: Lint
+        working-directory: frontend
+        run: npm run lint
+      - name: Build
+        working-directory: frontend
+        run: npm run build
+
+  docs:
+    name: Documentation integrity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Validate documentation source graph
+        run: python scripts/validate_docs.py
