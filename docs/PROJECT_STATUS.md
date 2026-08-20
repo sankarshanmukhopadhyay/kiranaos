@@ -41,7 +41,7 @@ The prototype is designed to prove five things together:
 | Multi-store scope | Demonstrated | Store-scoped operational models and service queries |
 | Authentication and roles | Demonstrated | Optional JWT enforcement and owner/manager/staff permissions |
 | Observability | Basic | Health diagnostics, audit events, AI usage tracking |
-| Automated verification | Complete for prototype | Backend tests/lint/typecheck, frontend lint/build, docs validation in CI |
+| Automated verification | Complete for prototype | Backend tests/lint/typecheck, frontend typecheck/build, docs validation in CI |
 | Deployment | Demonstrated only | Docker Compose, Railway/Vercel configuration examples |
 
 ## Explicitly deferred
@@ -69,7 +69,7 @@ A repository state is considered consistent with this checkpoint when:
 make verify
 ```
 
-passes. The command covers backend tests, backend linting and type checking, frontend lint/build, and documentation integrity. The same checks are represented in `.github/workflows/ci.yml`.
+passes. The command covers backend tests, backend linting and type checking, frontend TypeScript checking/build, and documentation integrity. The same checks are represented in `.github/workflows/ci.yml`.
 
 ## How to evaluate the prototype
 
