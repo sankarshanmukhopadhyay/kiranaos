@@ -97,7 +97,7 @@ The same quality gates run in GitHub Actions. A successful result proves that th
 
 ## What this walkthrough does not prove
 
-A successful demonstration does **not** establish production readiness, security certification, payment compliance, high-scale reliability, or operational suitability for unsupervised deployment. Those requirements are explicitly deferred in the [Prototype Status](/kiranaos/project/status/) document.
+A successful demonstration does **not** establish production readiness, security certification, payment compliance, high-scale reliability, or operational suitability for unsupervised deployment. Those requirements are explicitly deferred in the [Prototype Status]({% link PROJECT_STATUS.md %}) document.
 
 ## Mental model
 
