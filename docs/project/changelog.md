@@ -17,7 +17,7 @@ KiranaOS is closed at a prototype-complete checkpoint. v2.5.0 remains the curren
 
 ### Added
 
-- GitHub Actions CI for backend lint/typecheck/tests, frontend lint/build, and documentation integrity.
+- GitHub Actions CI for backend lint/typecheck/tests, frontend typecheck/build, and documentation integrity.
 - `make verify` as the local acceptance gate.
 - [Prototype Status]({% link PROJECT_STATUS.md %}) with the implemented/deferred capability boundary.
 - [Demo Walkthrough]({% link DEMO_WALKTHROUGH.md %}) covering the full intended journey.
@@ -28,6 +28,8 @@ KiranaOS is closed at a prototype-complete checkpoint. v2.5.0 remains the curren
 - The roadmap is closed at the prototype boundary; former Release 4 work is deferred productization.
 - Deployment language no longer implies a production pipeline that the repository does not contain.
 - Repository hygiene excludes generated/environment/workstation artifacts and removes tracked `.DS_Store` metadata.
+- Release 3 finance formatting/type defects exposed by the restored gate are corrected without changing financial behavior.
+- Frontend verification uses dependency-complete TypeScript checking and a Vite build.
 
 ### Validation target
 
