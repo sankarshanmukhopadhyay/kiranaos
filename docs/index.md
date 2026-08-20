@@ -46,4 +46,4 @@ Run the repository acceptance gate locally with:
 make verify
 ```
 
-GitHub Actions independently runs backend tests/lint/typecheck, frontend lint/build, and documentation validation.
+GitHub Actions independently runs backend tests/lint/typecheck, frontend TypeScript typecheck/build, and documentation validation.
