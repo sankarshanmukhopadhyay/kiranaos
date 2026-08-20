@@ -446,11 +446,15 @@ def export_accounting(
     suffix = day or datetime.now(timezone.utc).date().isoformat()
 
     if fmt == "csv":
-        out = StringIO()
-        writer = csv.DictWriter(out, fieldnames=fields)
+        text_buffer = StringIO()
+        writer = csv.DictWriter(text_buffer, fieldnames=fields)
         writer.writeheader()
         writer.writerows(rows)
-        return out.getvalue().encode(), "text/csv", f"kiranaos-accounting-{suffix}.csv"
+        return (
+            text_buffer.getvalue().encode(),
+            "text/csv",
+            f"kiranaos-accounting-{suffix}.csv",
+        )
 
     workbook = Workbook()
     worksheet = workbook.active
@@ -459,10 +463,10 @@ def export_accounting(
     for row in rows:
         worksheet.append([row[field] for field in fields])
 
-    out = BytesIO()
-    workbook.save(out)
+    binary_buffer = BytesIO()
+    workbook.save(binary_buffer)
     return (
-        out.getvalue(),
+        binary_buffer.getvalue(),
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         f"kiranaos-accounting-{suffix}.xlsx",
     )
