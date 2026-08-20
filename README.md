@@ -54,7 +54,7 @@ The acceptance gate runs:
 - backend tests;
 - backend Ruff linting;
 - backend mypy type checking;
-- frontend reproducible install, lint, and build;
+- frontend reproducible install, TypeScript type checking, and Vite build;
 - documentation integrity validation.
 
 The same gates are represented in `.github/workflows/ci.yml` for pull requests and changes to `main`.
@@ -110,7 +110,7 @@ The architectural boundary is deliberate: **message interpretation does not itse
 | Settlement | Daily settlement generation and owner closure |
 | Accounting | CSV and XLSX export |
 | Governance | Store scope, optional JWT authentication, role permissions, audit events |
-| Assurance | Backend tests/lint/typecheck, frontend lint/build, docs validation, CI |
+| Assurance | Backend tests/lint/typecheck, frontend typecheck/build, docs validation, CI |
 
 ## Repository structure
 
