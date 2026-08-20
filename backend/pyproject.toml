@@ -56,3 +56,10 @@ ignore  = ["E501", "B008", "UP017"]
 [tool.mypy]
 python_version = "3.11"
 ignore_missing_imports = true
+
+# PaymentMethod keeps the public wire value/member name `split`. Mypy 2.x
+# treats that StrEnum member as an assignment over str.split; runtime enum
+# semantics and the API value are intentional, so scope the exception here.
+[[tool.mypy.overrides]]
+module = "app.models.domain"
+disable_error_code = ["assignment"]
