@@ -1,6 +1,8 @@
 # KiranaOS Roadmap
 
-KiranaOS follows a commercially sequenced roadmap. Each release must strengthen adoption, daily retention, or monetization evidence without turning AI into an uncontrolled authority layer.
+KiranaOS has reached the intended **prototype-complete** state for the current project. The repository now demonstrates the end-to-end merchant operating model from conversational order capture through review, store operations, payment, settlement, accounting handoff, and audit evidence.
+
+Further work is intentionally demand-driven rather than roadmap-driven. New implementation should begin only when there is a concrete pilot, adoption, integration, or production requirement.
 
 ## Completed: Release 1 Commercial Foundation, v2.3.0
 
@@ -8,51 +10,49 @@ Release 1 stabilized the repository for controlled pilots: provider correctness,
 
 ## Completed: Release 2 Operations Release, v2.4.0
 
-Release 2 makes KiranaOS useful for daily merchant operations. The release adds product catalog management, substitutions, order item product binding, repeat orders, customer history, staff assignment, order notes, daily operations reporting, feature flags, and AI usage tracking.
-
-### Release 2 acceptance criteria
-
-- A merchant operator can maintain a simple product catalog.
-- Ambiguous order items can be corrected and linked to catalog products.
-- Approved substitutions can be recorded without rewriting the original customer request.
-- Repeat orders can be generated from historical orders.
-- Customer history is queryable without manual database inspection.
-- Store staff can be assigned to fulfillment tasks.
-- AI usage can be recorded and summarized as an operational cost signal.
-- The daily report produces operational evidence for pilots.
+Release 2 made KiranaOS useful as a daily merchant operations demonstrator: product catalog management, substitutions, product binding, repeat orders, customer history, staff assignment, order notes, daily operations reporting, feature flags, and AI usage tracking.
 
 ## Completed: Release 3 Order-to-Cash Release, v2.5.0
 
-Release 3 establishes the monetizable workflow surface: tender-aware payments, order-level reconciliation, controlled refunds and cancellations, daily settlement closure, and accountant-ready exports.
+Release 3 established the monetizable workflow surface: cash, UPI, and split payments; order reconciliation; controlled refunds and cancellations; daily settlement closure; and accountant-ready CSV/XLSX exports.
 
-### Release 3 acceptance criteria
+## Completed: Prototype closeout, August 2026
 
-- Cash, UPI, and split payments are represented explicitly.
-- Payments cannot exceed the outstanding order amount.
-- Every order exposes computed paid, refunded, net-paid, and outstanding totals.
-- Managers can request refunds, while only owners can approve or reject them.
-- Undelivered cancellations produce a reasoned audit event; delivered orders use refunds.
-- Daily settlements separate cash, UPI, refunds, and net receipts.
-- Only owners can close a settlement.
-- CSV and XLSX exports support accountant and POS handoff.
-- Financial mutations remain store-scoped and auditable.
+The closeout checkpoint makes the repository meaningful as a durable reference implementation rather than an unfinished feature sequence.
 
-## Next: Release 4 Partner and Platform Foundations
+Acceptance criteria:
 
-Release 4 should focus on controlled integrations and repeatable commercial deployment: plan/quota enforcement, API keys, webhooks, partner-sponsored onboarding, and multi-store portfolio visibility.
+- The intended outcome is explained through an end-to-end demo walkthrough.
+- Implemented capabilities and deferred production requirements are explicitly separated.
+- Backend tests, linting, and type checking are represented in CI.
+- Frontend linting and build are represented in CI.
+- Documentation integrity is represented in CI and GitHub Pages publication remains supported.
+- `make verify` provides one local acceptance gate.
+- Repository hygiene excludes generated, environment, and workstation artifacts.
+- No future platform or production feature is implied to be required for the prototype to be considered complete.
 
-## Later
+## Deferred until there is a concrete need
 
-- Distributor-sponsored flows.
-- Multi-merchant partner console.
-- API keys and webhooks for platform integrations.
-- Offline-first workflows.
-- Vertical packs for restaurants, pharmacies, bakeries, and cloud kitchens.
+The former “Release 4 Partner and Platform Foundations” is no longer an active release commitment. The following capabilities are deferred:
 
-## Not planned for core releases
+- plan/quota enforcement and billing;
+- API keys and external partner webhooks;
+- partner-sponsored onboarding;
+- multi-store portfolio/partner console;
+- distributor-sponsored flows;
+- offline-first synchronization;
+- vertical-specific packs;
+- production infrastructure hardening, SLOs, observability, backup/recovery, and scale testing;
+- formal payment/compliance integrations.
 
-- Autonomous agents with direct write authority.
-- Credit scoring.
-- Advanced dynamic pricing.
-- Marketplace orchestration.
-- Distributor monetization before store operations and order-to-cash evidence are stable.
+These items are productization work, not missing proof-of-concept functionality.
+
+## Explicitly not planned without a new project mandate
+
+- autonomous agents with direct write authority;
+- credit scoring;
+- advanced dynamic pricing;
+- marketplace orchestration;
+- distributor monetization before a validated merchant adoption case exists.
+
+See `docs/PROJECT_STATUS.md` for the formal prototype boundary and `docs/DEMO_WALKTHROUGH.md` for the shortest path through the intended outcome.
