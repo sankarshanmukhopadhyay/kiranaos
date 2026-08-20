@@ -73,7 +73,7 @@ passes. The command covers backend tests, backend linting and type checking, fro
 
 ## How to evaluate the prototype
 
-Use the [Demo Walkthrough](/kiranaos/demo/) to exercise the intended journey from inbound order to review, fulfilment, payment, settlement, and audit evidence. Use the [Architecture](/kiranaos/architecture/) and [Security Model](/kiranaos/security-model/) for the authority and trust boundaries behind that journey.
+Use the [Demo Walkthrough]({% link DEMO_WALKTHROUGH.md %}) to exercise the intended journey from inbound order to review, fulfilment, payment, settlement, and audit evidence. Use the [Architecture]({% link ARCHITECTURE.md %}) and [Security Model]({% link SECURITY_MODEL.md %}) for the authority and trust boundaries behind that journey.
 
 ## Project disposition
 
