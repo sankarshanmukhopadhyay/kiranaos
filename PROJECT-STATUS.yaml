@@ -1,0 +1,31 @@
+schema_version: "1.0"
+project:
+  name: kiranaos
+  maturity: implementation-draft
+  lifecycle: active
+  operational_status: active-development
+  specification_status: not-applicable
+  intended_use:
+    - kirana-operations-platform-development
+    - applied-governance-experimentation
+    - implementation-validation
+  not_asserted:
+    - production-certification
+    - sector-wide-governance-authority
+    - independent-third-party-assurance
+authority:
+  normative_scope:
+    - kirana-operations-platform
+  does_not_own:
+    - external-regulatory-authority
+    - payment-network-governance
+    - third-party-platform-policy
+  delegation: "Repository maintainers govern the application and repository-local operational contracts; external regulatory, payment, and platform authorities retain their own decision rights."
+  revocation_or_supersession: "Application contracts and governance artifacts are superseded by explicit versioned changes with prior states retained for audit."
+evidence:
+  validation_commands:
+    - git diff --check
+  evidence_outputs: []
+  known_limitations:
+    - production certification is not asserted
+    - external regulatory and ecosystem authority is outside repository scope
