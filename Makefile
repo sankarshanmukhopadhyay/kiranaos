@@ -1,4 +1,4 @@
-.PHONY: dev seed test lint typecheck install clean help
+.PHONY: dev seed test lint typecheck frontend-check docs-check verify install clean help
 
 # ── Development ───────────────────────────────────────────────────────────────
 
@@ -23,15 +23,13 @@ migrate:       ## Apply Alembic migrations
 migration:     ## Create an Alembic migration, e.g. make migration msg="add table"
 	cd backend && alembic revision --autogenerate -m "$(msg)"
 
-# ── Testing ───────────────────────────────────────────────────────────────────
+# ── Verification ──────────────────────────────────────────────────────────────
 
 test:          ## Run all backend tests
 	cd backend && pip install --no-build-isolation -e ".[dev]" -q && pytest -v
 
 test-watch:    ## Run tests in watch mode
 	cd backend && pytest -v --tb=short -x
-
-# ── Linting & type checking ───────────────────────────────────────────────────
 
 lint:          ## Lint backend with ruff
 	cd backend && ruff check app tests
@@ -41,6 +39,14 @@ lint-fix:      ## Auto-fix lint issues
 
 typecheck:     ## Type-check backend with mypy
 	cd backend && mypy app
+
+frontend-check: ## Install, type-check, and build the frontend reproducibly
+	cd frontend && npm ci && npm run typecheck && npm run build
+
+docs-check:    ## Validate the GitHub Pages documentation source graph
+	python scripts/validate_docs.py
+
+verify: test lint typecheck frontend-check docs-check ## Run the complete prototype acceptance gate
 
 # ── Installation ──────────────────────────────────────────────────────────────
 

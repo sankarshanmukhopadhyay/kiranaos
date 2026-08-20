@@ -1,5 +1,32 @@
 # Changelog
 
+## Prototype closeout - August 2026
+
+KiranaOS is now closed at a prototype-complete checkpoint. This is a project disposition milestone rather than a new production release: v2.5.0 remains the current implemented Order-to-Cash release, while the closeout work makes the repository coherent, verifiable, and understandable as a durable reference prototype.
+
+### Added
+
+- GitHub Actions CI for backend lint/typecheck/tests, frontend typecheck/build, and documentation integrity.
+- `make verify` as the single local prototype acceptance gate.
+- `docs/PROJECT_STATUS.md` with an explicit capability matrix and production-readiness boundary.
+- `docs/DEMO_WALKTHROUGH.md` with an end-to-end path from simulated inbound message through review, operations, payment, settlement, accounting, and audit.
+- Documentation-home guidance that starts with intended outcome rather than release history.
+
+### Changed
+
+- Reframed the README around the system thesis, implemented capability surface, verification path, and explicit non-production status.
+- Closed the roadmap at the current prototype objective instead of carrying Release 4 platform foundations as unfinished work.
+- Reclassified partner APIs, quotas, portfolio consoles, offline sync, scale hardening, and similar work as deferred productization.
+- Corrected repository setup and deployment language so local/demo support is not presented as an automated production pipeline.
+- Expanded `.gitignore` and removed tracked `.DS_Store` metadata.
+- Normalized Release 3 finance code sufficiently for the new lint/typecheck gate without changing order-to-cash behavior.
+- Replaced a broken frontend ESLint path with dependency-complete TypeScript verification plus a Vite build.
+- Synchronized the GitHub Pages project overview and roadmap with their canonical root documents.
+
+### Validation target
+
+The closeout acceptance gate is `make verify`, mirrored by `.github/workflows/ci.yml`. The closeout PR provides the authoritative CI evidence for the final branch state.
+
 ## v2.5.0 - Release 3 Order-to-Cash Release
 
 Release 3 adds controlled financial execution to the KiranaOS workflow. It introduces cash, UPI, and split-tender payments; order reconciliation summaries; manager-requested and owner-approved refunds; financial cancellation controls; daily settlement generation and closure; and CSV/XLSX accounting exports.
@@ -27,7 +54,6 @@ Release 3 adds controlled financial execution to the KiranaOS workflow. It intro
 - Backend source compilation passed.
 - Core API and parser suite: 57 tests passed, including all new Release 3 tests.
 - CSV and XLSX export generation validated.
-
 
 ## v2.4.0 - Release 2 Operations Release
 

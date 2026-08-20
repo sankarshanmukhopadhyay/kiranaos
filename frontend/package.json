@@ -3,17 +3,17 @@
   "version": "2.5.0",
   "private": true,
   "scripts": {
-    "dev":     "vite",
-    "build":   "tsc && vite build",
+    "dev": "vite",
+    "build": "tsc && vite build",
     "preview": "vite preview",
-    "lint":    "eslint src"
+    "typecheck": "tsc --noEmit --pretty false"
   },
   "dependencies": {
-    "react":     "^18.3.1",
+    "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
-    "@types/react":     "^18.3.3",
+    "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^6.0.3",
     "eslint": "^9.9.1",
