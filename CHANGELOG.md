@@ -6,7 +6,7 @@ KiranaOS is now closed at a prototype-complete checkpoint. This is a project dis
 
 ### Added
 
-- GitHub Actions CI for backend lint/typecheck/tests, frontend lint/build, and documentation integrity.
+- GitHub Actions CI for backend lint/typecheck/tests, frontend typecheck/build, and documentation integrity.
 - `make verify` as the single local prototype acceptance gate.
 - `docs/PROJECT_STATUS.md` with an explicit capability matrix and production-readiness boundary.
 - `docs/DEMO_WALKTHROUGH.md` with an end-to-end path from simulated inbound message through review, operations, payment, settlement, accounting, and audit.
@@ -19,11 +19,13 @@ KiranaOS is now closed at a prototype-complete checkpoint. This is a project dis
 - Reclassified partner APIs, quotas, portfolio consoles, offline sync, scale hardening, and similar work as deferred productization.
 - Corrected repository setup and deployment language so local/demo support is not presented as an automated production pipeline.
 - Expanded `.gitignore` and removed tracked `.DS_Store` metadata.
+- Normalized Release 3 finance code sufficiently for the new lint/typecheck gate without changing order-to-cash behavior.
+- Replaced a broken frontend ESLint path with dependency-complete TypeScript verification plus a Vite build.
 - Synchronized the GitHub Pages project overview and roadmap with their canonical root documents.
 
 ### Validation target
 
-The closeout acceptance gate is `make verify`, mirrored by `.github/workflows/ci.yml`. The closeout PR is expected to provide the authoritative CI evidence for the final branch state.
+The closeout acceptance gate is `make verify`, mirrored by `.github/workflows/ci.yml`. The closeout PR provides the authoritative CI evidence for the final branch state.
 
 ## v2.5.0 - Release 3 Order-to-Cash Release
 
@@ -133,7 +135,7 @@ Release 1 stabilizes KiranaOS for controlled merchant pilots. It is intentionall
 ## v2.2.0 - Adoption-Ready Operational Release
 
 - Added provider-aware outbound WhatsApp confirmations for simulation, Twilio, and Meta.
-- Added deterministic delivery route optimization with geocoded customer coordinates with deterministic fallback.
+- Added deterministic delivery route optimization with geocoded nearest-neighbour routing and address-sort fallback.
 - Added role-based authority across owner, manager, and staff workflows.
 - Added audit events for order, credit, outbound, delivery, route, and payment mutations.
 - Bumped backend, frontend, and API metadata to `2.2.0`.
