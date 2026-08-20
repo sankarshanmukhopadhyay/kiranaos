@@ -40,8 +40,8 @@ lint-fix:      ## Auto-fix lint issues
 typecheck:     ## Type-check backend with mypy
 	cd backend && mypy app
 
-frontend-check: ## Install, lint, and build the frontend reproducibly
-	cd frontend && npm ci && npm run lint && npm run build
+frontend-check: ## Install, type-check, and build the frontend reproducibly
+	cd frontend && npm ci && npm run typecheck && npm run build
 
 docs-check:    ## Validate the GitHub Pages documentation source graph
 	python scripts/validate_docs.py
