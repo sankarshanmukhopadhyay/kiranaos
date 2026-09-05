@@ -1,3 +1,10 @@
+---
+layout: default
+title: Public repository baseline
+parent: Project
+permalink: /project/public-repository-baseline/
+---
+
 # Public repository baseline
 
 This record captures controls reviewed under issue #8. It is repository assurance evidence, not external certification.
