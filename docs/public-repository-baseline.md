@@ -1,7 +1,7 @@
 ---
 layout: default
 title: Public repository baseline
-parent: Project
+parent: Project Governance
 permalink: /project/public-repository-baseline/
 ---
 
