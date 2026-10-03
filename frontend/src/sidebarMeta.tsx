@@ -1,3 +1,5 @@
+import type { ReactElement } from "react";
+
 export const SIDEBAR_LABELS: Record<string, string> = {
   dashboard: "Dashboard",
   customers: "Customers",
@@ -6,7 +8,7 @@ export const SIDEBAR_LABELS: Record<string, string> = {
   simulate: "Simulate WA",
 };
 
-export const SIDEBAR_ICONS: Record<string, JSX.Element> = {
+export const SIDEBAR_ICONS: Record<string, ReactElement> = {
   dashboard: (
     <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
       <path d="M2 2h5v5H2V2zm7 0h5v5H9V2zM2 9h5v5H2V9zm7 0h5v5H9V9z" />
