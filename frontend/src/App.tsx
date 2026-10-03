@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
 import "./styles.css";
 import { api, AuditEvent, Customer, DailyClosing, DashboardSummary, getAuthToken, Order, OrderStatus, Settlement, Store } from "./lib/api";
 
@@ -268,7 +268,7 @@ function App() {
   );
 }
 
-function Header({ title, subtitle, action }: { title: string; subtitle: string; action?: JSX.Element }) {
+function Header({ title, subtitle, action }: { title: string; subtitle: string; action?: ReactElement }) {
   return <div className="dashboard-header"><div><div className="dashboard-title">{title}</div><div className="dashboard-subtitle">{subtitle}</div></div>{action}</div>;
 }
 
